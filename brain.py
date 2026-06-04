@@ -26,7 +26,8 @@ try:
 except ImportError:
     HAS_VEC = False
 
-BRAIN_DIR = Path.home() / ".brain"
+# Multi-brain support: set BRAIN_DIR env var or pass --brain <path> to override
+BRAIN_DIR = Path(os.environ.get("BRAIN_DIR", str(Path.home() / ".brain")))
 DB_PATH = BRAIN_DIR / ".graph.db"
 EMBED_MODEL = "text-embedding-3-small"
 EMBED_DIM = 1536
@@ -681,40 +682,51 @@ def rebuild() -> dict:
 # --- CLI ---
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
+    # Handle --brain <path> flag
+    args = sys.argv[1:]
+    if "--brain" in args:
+        idx = args.index("--brain")
+        BRAIN_DIR = Path(args[idx + 1]).expanduser()
+        DB_PATH = BRAIN_DIR / ".graph.db"
+        args = args[:idx] + args[idx+2:]
+
+    if len(args) < 1:
         print(json.dumps({"error": "Commands: add, edge, log, search, fts, vec, neighbors, read, query, types, list, delete, reindex, rebuild, stats"}))
         sys.exit(1)
 
-    cmd = sys.argv[1]
+    # Ensure brain dir exists
+    BRAIN_DIR.mkdir(parents=True, exist_ok=True)
+
+    cmd = args[0]
     try:
         if cmd == "add":
-            result = add_node(sys.argv[2], sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else "")
+            result = add_node(args[1], args[2], args[3] if len(args) > 3 else "")
         elif cmd == "edge":
-            result = add_edge(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6])
+            result = add_edge(args[1], args[2], args[3], args[4], args[5])
         elif cmd == "log":
-            result = log_event(sys.argv[2], sys.argv[3], sys.argv[4])
+            result = log_event(args[1], args[2], args[3])
         elif cmd == "search":
-            node_type = sys.argv[3] if len(sys.argv) > 3 else None
-            result = search(sys.argv[2], node_type)
+            node_type = args[2] if len(args) > 2 else None
+            result = search(args[1], node_type)
         elif cmd == "fts":
-            result = fts_search(sys.argv[2])
+            result = fts_search(args[1])
         elif cmd == "vec":
-            result = vec_search(sys.argv[2])
+            result = vec_search(args[1])
         elif cmd == "neighbors":
-            hops = int(sys.argv[3]) if len(sys.argv) > 3 else 1
-            result = get_neighbors(sys.argv[2], hops)
+            hops = int(args[2]) if len(args) > 2 else 1
+            result = get_neighbors(args[1], hops)
         elif cmd == "read":
-            result = read_node_content(sys.argv[2])
+            result = read_node_content(args[1])
         elif cmd == "query":
-            hops = int(sys.argv[3]) if len(sys.argv) > 3 else 2
-            result = query_related(sys.argv[2], hops)
+            hops = int(args[2]) if len(args) > 2 else 2
+            result = query_related(args[1], hops)
         elif cmd == "types":
             result = list_types()
         elif cmd == "list":
-            node_type = sys.argv[2] if len(sys.argv) > 2 else None
+            node_type = args[1] if len(args) > 1 else None
             result = list_nodes(node_type)
         elif cmd == "delete":
-            result = delete_node(sys.argv[2])
+            result = delete_node(args[1])
         elif cmd == "rebuild":
             result = rebuild()
         elif cmd == "reindex":
