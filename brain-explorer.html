@@ -165,6 +165,18 @@ button:hover { background: var(--cp-accent-hover); }
 .graph-legend {
   display: flex; gap: 12px; margin-top: 12px; font-size: 0.75rem; color: var(--cp-text-muted);
 }
+.type-filters {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;
+}
+.type-chip {
+  padding: 5px 12px; border-radius: 0.625rem; font-size: 0.8125rem;
+  font-weight: 500; cursor: pointer; border: 2px solid transparent;
+  transition: opacity 0.15s, border-color 0.15s;
+  color: #fff;
+}
+.type-chip.inactive {
+  opacity: 0.3; border-color: var(--cp-border);
+}
 .legend-item { display: flex; align-items: center; gap: 4px; }
 .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
 
@@ -207,6 +219,7 @@ button:hover { background: var(--cp-accent-hover); }
   </div>
 
   <div class="graph-view" id="graph-view">
+    <div class="type-filters" id="type-filters"></div>
     <div id="graph-canvas">
       <canvas id="canvas"></canvas>
       <div class="node-tooltip" id="tooltip"></div>
@@ -366,11 +379,44 @@ async function loadGraph() {
     // Yield to let spinner paint before heavy computation
     await new Promise(r => setTimeout(r, 50));
     document.getElementById('graph-canvas').innerHTML = `<canvas id="canvas"></canvas><div class="node-tooltip" id="tooltip"></div>`;
+    buildTypeFilters();
     renderGraph();
     renderLegend();
   } catch(e) {
     document.getElementById('graph-canvas').innerHTML = `<div class="status error">${e.message}</div>`;
   }
+}
+
+// Type filter state
+let activeTypes = null; // null = all visible
+
+function buildTypeFilters() {
+  const types = [...new Set(graphData.nodes.map(n => n.type))].sort();
+  activeTypes = new Set(types);
+  const container = document.getElementById('type-filters');
+  container.innerHTML = types.map(t =>
+    `<span class="type-chip" data-type="${t}" style="background:${getTypeColor(t)}">${t} (${graphData.nodes.filter(n=>n.type===t).length})</span>`
+  ).join('') + `<span class="type-chip" style="background:var(--cp-text-muted)" data-action="all">Show All</span>`;
+
+  container.addEventListener('click', (e) => {
+    const chip = e.target.closest('.type-chip');
+    if (!chip) return;
+    if (chip.dataset.action === 'all') {
+      activeTypes = new Set(types);
+      container.querySelectorAll('.type-chip').forEach(c => c.classList.remove('inactive'));
+    } else {
+      const type = chip.dataset.type;
+      if (activeTypes.has(type)) {
+        activeTypes.delete(type);
+        chip.classList.add('inactive');
+      } else {
+        activeTypes.add(type);
+        chip.classList.remove('inactive');
+      }
+    }
+    // Trigger redraw
+    if (window._graphNeedsDraw) window._graphNeedsDraw();
+  });
 }
 
 function renderLegend() {
@@ -519,11 +565,16 @@ function renderGraph() {
     const mutedColor = getComputedStyle(document.documentElement).getPropertyValue('--cp-text-muted').trim();
     const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--cp-border').trim();
 
+    // Filter by active types
+    const visibleNodes = activeTypes ? nodes.filter(n => activeTypes.has(n.type)) : nodes;
+    const visibleSet = new Set(visibleNodes);
+    const visibleEdges = edges.filter(e => visibleSet.has(e.source) && visibleSet.has(e.target));
+
     // Draw edges
     ctx.globalAlpha = 0.25;
     ctx.strokeStyle = edgeColor;
     ctx.lineWidth = 1 / scale;
-    for (const e of edges) {
+    for (const e of visibleEdges) {
       ctx.beginPath();
       ctx.moveTo(e.source.x, e.source.y);
       ctx.lineTo(e.target.x, e.target.y);
@@ -536,7 +587,7 @@ function renderGraph() {
       ctx.font = `${9/scale}px "Segoe UI", sans-serif`;
       ctx.fillStyle = mutedColor;
       ctx.textAlign = 'center';
-      for (const e of edges) {
+      for (const e of visibleEdges) {
         const mx = (e.source.x + e.target.x) / 2;
         const my = (e.source.y + e.target.y) / 2;
         ctx.fillText(e.relationship, mx, my - 4/scale);
@@ -544,7 +595,7 @@ function renderGraph() {
     }
 
     // Draw nodes
-    for (const n of nodes) {
+    for (const n of visibleNodes) {
       ctx.beginPath();
       ctx.arc(n.x, n.y, NODE_RADIUS, 0, Math.PI * 2);
       ctx.fillStyle = getTypeColor(n.type);
@@ -556,7 +607,7 @@ function renderGraph() {
       ctx.font = `${9/scale}px "Segoe UI", sans-serif`;
       ctx.fillStyle = textColor;
       ctx.textAlign = 'center';
-      for (const n of nodes) {
+      for (const n of visibleNodes) {
         ctx.fillText(n.name, n.x, n.y + NODE_RADIUS + 8/scale);
       }
     }
@@ -566,6 +617,7 @@ function renderGraph() {
 
   // Render loop — only redraws when needed
   let needsDraw = true;
+  window._graphNeedsDraw = () => { needsDraw = true; };
   function renderLoop() {
     if (needsDraw) { draw(); needsDraw = false; }
     animFrame = requestAnimationFrame(renderLoop);
