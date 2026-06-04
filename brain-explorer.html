@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brain Explorer</title>
+<script>
+  (() => {
+    const param = new URLSearchParams(window.location.search).get("clawpilotTheme");
+    const theme =
+      param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.setAttribute("data-theme", theme);
+  })();
+</script>
+<style>
+:root {
+  color-scheme: light;
+  --cp-bg: #f7f4ef;
+  --cp-bg-elevated: #fcfbf8;
+  --cp-surface: #ffffff;
+  --cp-surface-soft: #f5f5f5;
+  --cp-border: #dedede;
+  --cp-border-strong: #919191;
+  --cp-text: #242424;
+  --cp-text-muted: #5c5c5c;
+  --cp-text-soft: #6f6f6f;
+  --cp-accent: #b11f4b;
+  --cp-accent-hover: #9a1a41;
+  --cp-accent-soft: rgba(177, 31, 75, 0.08);
+  --cp-accent-fg: #ffffff;
+  --cp-success: #16a34a;
+  --cp-danger: #dc2626;
+  --cp-warning: #f59e0b;
+  --cp-link: #0078d4;
+  --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+  --cp-overlay: rgba(255, 255, 255, 0.8);
+  --cp-panel: rgba(255, 255, 255, 0.86);
+  --cp-panel-strong: rgba(255, 255, 255, 0.96);
+  --cp-sheen: rgba(255, 255, 255, 0.55);
+  --cp-highlight: rgba(177, 31, 75, 0.12);
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --cp-bg: #3d3b3a;
+  --cp-bg-elevated: #343231;
+  --cp-surface: #292929;
+  --cp-surface-soft: #2e2e2e;
+  --cp-border: #474747;
+  --cp-border-strong: #5f5f5f;
+  --cp-text: #dedede;
+  --cp-text-muted: #919191;
+  --cp-text-soft: #b0b0b0;
+  --cp-accent: #fd8ea1;
+  --cp-accent-hover: #fb7b91;
+  --cp-accent-soft: rgba(253, 142, 161, 0.14);
+  --cp-accent-fg: #1a1a1a;
+  --cp-success: #4ade80;
+  --cp-danger: #f87171;
+  --cp-warning: #fbbf24;
+  --cp-link: #4da6ff;
+  --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+  --cp-overlay: rgba(41, 41, 41, 0.88);
+  --cp-panel: rgba(41, 41, 41, 0.72);
+  --cp-panel-strong: rgba(41, 41, 41, 0.96);
+  --cp-sheen: rgba(255, 255, 255, 0.04);
+  --cp-highlight: rgba(253, 142, 161, 0.12);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--cp-bg);
+  color: var(--cp-text);
+  padding: 24px;
+  min-height: 100vh;
+}
+.container { max-width: 900px; margin: 0 auto; }
+h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.subtitle { color: var(--cp-text-muted); font-size: 0.875rem; margin-bottom: 20px; }
+.search-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+input[type="text"] {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid var(--cp-border);
+  border-radius: 0.625rem;
+  background: var(--cp-surface);
+  color: var(--cp-text);
+  font-size: 0.9375rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+input[type="text"]:focus { border-color: var(--cp-accent); }
+input[type="text"]::placeholder { color: var(--cp-text-muted); }
+select {
+  padding: 10px 14px;
+  border: 1px solid var(--cp-border);
+  border-radius: 0.625rem;
+  background: var(--cp-surface);
+  color: var(--cp-text);
+  font-size: 0.875rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 0.625rem;
+  background: var(--cp-accent);
+  color: var(--cp-accent-fg);
+  font-size: 0.875rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+button:hover { background: var(--cp-accent-hover); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.results { display: flex; flex-direction: column; gap: 12px; }
+.result-card {
+  background: var(--cp-surface);
+  border: 1px solid var(--cp-border);
+  border-radius: 16px;
+  padding: 16px 20px;
+  box-shadow: 0 0 2px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.14);
+}
+.result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.result-id {
+  font-family: Consolas, "Courier New", Courier, monospace;
+  font-size: 0.8125rem;
+  color: var(--cp-accent);
+  font-weight: 500;
+}
+.result-score {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 0.625rem;
+  font-weight: 500;
+}
+.score-vec { background: var(--cp-accent-soft); color: var(--cp-accent); }
+.score-keyword { background: var(--cp-highlight); color: var(--cp-text-muted); }
+.score-name { background: var(--cp-surface-soft); color: var(--cp-text-muted); }
+.result-content {
+  font-size: 0.8125rem;
+  color: var(--cp-text-soft);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  font-family: Consolas, "Courier New", Courier, monospace;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 12px;
+  background: var(--cp-surface-soft);
+  border-radius: 0.625rem;
+  margin-top: 8px;
+}
+.edges-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--cp-border);
+}
+.edge-tag {
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  margin: 2px 4px 2px 0;
+  border-radius: 0.625rem;
+  background: var(--cp-surface-soft);
+  color: var(--cp-text-muted);
+  border: 1px solid var(--cp-border);
+}
+.status {
+  text-align: center;
+  padding: 40px;
+  color: var(--cp-text-muted);
+  font-size: 0.875rem;
+}
+.status.error { color: var(--cp-danger); }
+.stats-bar {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 12px 16px;
+  background: var(--cp-surface);
+  border: 1px solid var(--cp-border);
+  border-radius: 0.625rem;
+  font-size: 0.8125rem;
+  color: var(--cp-text-muted);
+}
+.stat-item strong { color: var(--cp-text); }
+.tab-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+.tab {
+  padding: 6px 14px;
+  border-radius: 0.625rem;
+  font-size: 0.8125rem;
+  background: var(--cp-surface-soft);
+  color: var(--cp-text-muted);
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.tab.active {
+  background: var(--cp-accent-soft);
+  color: var(--cp-accent);
+  border-color: var(--cp-accent);
+}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Brain Explorer</h1>
+  <p class="subtitle">Query your second brain — vector similarity, keyword search, and graph traversal</p>
+
+  <div class="stats-bar" id="stats">Loading...</div>
+
+  <div class="search-bar">
+    <input type="text" id="query" placeholder="Search your brain..." autofocus>
+    <select id="mode">
+      <option value="query">Full Query (vec + keyword + graph)</option>
+      <option value="vec">Vector Only</option>
+      <option value="fts">Keyword Only</option>
+      <option value="search">Name Only</option>
+    </select>
+    <button id="searchBtn" onclick="doSearch()">Search</button>
+  </div>
+
+  <div id="results"></div>
+</div>
+
+<script>
+const API = 'http://localhost:7433';
+
+document.getElementById('query').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch();
+});
+
+async function apiFetch(endpoint) {
+  const resp = await fetch(`${API}${endpoint}`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
+async function loadStats() {
+  try {
+    const s = await apiFetch('/stats');
+    document.getElementById('stats').innerHTML = `
+      <span class="stat-item"><strong>${s.nodes}</strong> nodes</span>
+      <span class="stat-item"><strong>${s.edges}</strong> edges</span>
+      <span class="stat-item"><strong>${s.vec_embedded}</strong> vectors</span>
+      <span class="stat-item"><strong>${s.types.length}</strong> types: ${s.types.join(', ')}</span>
+    `;
+  } catch(e) {
+    document.getElementById('stats').innerHTML = `<span class="stat-item" style="color:var(--cp-danger)">⚠ Cannot connect to brain server at ${API} — run: python ~/.brain/serve.py</span>`;
+  }
+}
+
+async function doSearch() {
+  const query = document.getElementById('query').value.trim();
+  if (!query) return;
+
+  const mode = document.getElementById('mode').value;
+  const resultsDiv = document.getElementById('results');
+  resultsDiv.innerHTML = '<div class="status">Searching...</div>';
+
+  try {
+    const data = await apiFetch(`/${mode}?q=${encodeURIComponent(query)}`);
+    renderResults(data, mode);
+  } catch(e) {
+    resultsDiv.innerHTML = `<div class="status error">${e.message}</div>`;
+  }
+}
+
+function renderResults(data, mode) {
+  const resultsDiv = document.getElementById('results');
+
+  if (mode === 'query') {
+    renderFullQuery(data);
+  } else if (mode === 'vec') {
+    renderVecResults(data);
+  } else if (mode === 'fts') {
+    renderFtsResults(data);
+  } else {
+    renderNameResults(data);
+  }
+}
+
+function renderFullQuery(data) {
+  const resultsDiv = document.getElementById('results');
+  let html = '';
+
+  // Show vector matches with content
+  const vecMatches = data.matches?.vector || [];
+  const content = data.related_content || {};
+  const edges = data.edges || [];
+
+  // Collect all nodes with their best score source
+  const scored = new Map();
+  for (const v of vecMatches) {
+    if (!v.error) scored.set(v.node_id, { source: 'vector', distance: v.distance });
+  }
+  for (const m of (data.matches?.keyword || [])) {
+    if (!scored.has(m.node_id)) scored.set(m.node_id, { source: 'keyword', snippet: m.snippet });
+  }
+  for (const m of (data.matches?.name || [])) {
+    if (!scored.has(m.id)) scored.set(m.id, { source: 'name' });
+  }
+
+  // Also include nodes from graph traversal
+  for (const nid of Object.keys(content)) {
+    if (!scored.has(nid)) scored.set(nid, { source: 'graph' });
+  }
+
+  if (scored.size === 0) {
+    resultsDiv.innerHTML = '<div class="status">No results found.</div>';
+    return;
+  }
+
+  for (const [nid, info] of scored) {
+    const nodeEdges = edges.filter(e => e.source_id === nid || e.target_id === nid);
+    html += renderCard(nid, info, content[nid], nodeEdges);
+  }
+
+  resultsDiv.innerHTML = html;
+}
+
+function renderVecResults(data) {
+  const resultsDiv = document.getElementById('results');
+  if (!data.length) { resultsDiv.innerHTML = '<div class="status">No results.</div>'; return; }
+  let html = '';
+  for (const r of data) {
+    html += renderCard(r.node_id, { source: 'vector', distance: r.distance });
+  }
+  resultsDiv.innerHTML = html;
+}
+
+function renderFtsResults(data) {
+  const resultsDiv = document.getElementById('results');
+  if (!data.length) { resultsDiv.innerHTML = '<div class="status">No results.</div>'; return; }
+  let html = '';
+  for (const r of data) {
+    html += renderCard(r.node_id, { source: 'keyword', snippet: r.snippet });
+  }
+  resultsDiv.innerHTML = html;
+}
+
+function renderNameResults(data) {
+  const resultsDiv = document.getElementById('results');
+  if (!data.length) { resultsDiv.innerHTML = '<div class="status">No results.</div>'; return; }
+  let html = '';
+  for (const r of data) {
+    html += renderCard(r.id, { source: 'name' });
+  }
+  resultsDiv.innerHTML = html;
+}
+
+function renderCard(nid, info, content, edges) {
+  let scoreHtml = '';
+  if (info.source === 'vector') {
+    scoreHtml = `<span class="result-score score-vec">vec: ${info.distance.toFixed(4)}</span>`;
+  } else if (info.source === 'keyword') {
+    scoreHtml = `<span class="result-score score-keyword">keyword match</span>`;
+  } else if (info.source === 'name') {
+    scoreHtml = `<span class="result-score score-name">name match</span>`;
+  } else {
+    scoreHtml = `<span class="result-score score-name">via graph</span>`;
+  }
+
+  let contentHtml = '';
+  if (content) {
+    const escaped = content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    contentHtml = `<div class="result-content">${escaped}</div>`;
+  }
+  if (info.snippet) {
+    contentHtml = `<div class="result-content">${info.snippet.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`;
+  }
+
+  let edgesHtml = '';
+  if (edges && edges.length) {
+    const tags = edges.map(e => {
+      const dir = e.source_id === nid ? `→ ${e.target_id}` : `← ${e.source_id}`;
+      return `<span class="edge-tag">${e.relationship} ${dir}</span>`;
+    }).join('');
+    edgesHtml = `<div class="edges-section">${tags}</div>`;
+  }
+
+  return `
+    <div class="result-card">
+      <div class="result-header">
+        <span class="result-id">${nid}</span>
+        ${scoreHtml}
+      </div>
+      ${contentHtml}
+      ${edgesHtml}
+    </div>`;
+}
+
+loadStats();
+</script>
+</body>
+</html>
