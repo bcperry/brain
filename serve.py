@@ -6,7 +6,8 @@ import urllib.parse
 from pathlib import Path
 
 # Import brain.py from the same directory as this script
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+SKILL_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SKILL_DIR))
 import brain
 
 PORT = 7433
@@ -19,6 +20,15 @@ class BrainHandler(http.server.BaseHTTPRequestHandler):
         q = params.get("q", [""])[0]
 
         try:
+            # Serve the explorer HTML at root
+            if path == "/" or path == "/index.html":
+                explorer_path = SKILL_DIR / "brain-explorer.html"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(explorer_path.read_bytes())
+                return
+
             if path == "/stats":
                 result = brain.stats()
             elif path == "/query" and q:
@@ -64,6 +74,7 @@ class BrainHandler(http.server.BaseHTTPRequestHandler):
 if __name__ == "__main__":
     server = http.server.HTTPServer(("127.0.0.1", PORT), BrainHandler)
     print(f"Brain API running on http://localhost:{PORT}")
+    print(f"Explorer: http://localhost:{PORT}/")
     print(f"Endpoints: /stats /query?q= /vec?q= /fts?q= /search?q= /list /read?q=")
     print(f"Press Ctrl+C to stop")
     server.serve_forever()
