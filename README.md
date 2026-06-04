@@ -1,0 +1,124 @@
+# Brain
+
+A lightweight personal knowledge graph for AI agents. Markdown files are the source of truth; SQLite provides the relationship graph and vector search layer.
+
+Inspired by [gbrain](https://github.com/garrytan/gbrain), but built to be minimal and self-contained — no Postgres, no external services, no daemon. Just Python, SQLite, and your filesystem.
+
+## How It Works
+
+```
+~/.copilot/m-skills/brain/   ← Code (this repo)
+  SKILL.md                    Skill instructions for Clawpilot / AI agents
+  brain.py                    Engine (graph, embeddings, file ops)
+  serve.py                    HTTP API for the browser-based explorer
+
+~/.brain/                    ← Data (your knowledge)
+  .graph.db                   SQLite: nodes, edges, vectors (sqlite-vec)
+  people/                     Markdown files by category
+  projects/
+  companies/
+  concepts/
+  ...
+```
+
+**Principles:**
+- Content lives ONLY in markdown files — the DB stores metadata + vectors, never content
+- Each markdown file is embedded as ONE vector (no chunking)
+- Categories are fully dynamic — any type string auto-creates a folder
+- Pages use a two-layer format: compiled truth (above `---`) + append-only timeline (below)
+
+## Requirements
+
+- Python 3.10+
+- `sqlite-vec` — `pip install sqlite-vec`
+- `gh` CLI authenticated — embeddings use GitHub Models API (free with Copilot license)
+
+## Quick Start
+
+```bash
+# Create your first node
+python brain.py add people "Jane Smith" "VP Engineering at Acme Corp"
+
+# Add a relationship
+python brain.py edge people "Jane Smith" companies "Acme Corp" works-at
+
+# Query (vector + keyword + graph traversal)
+python brain.py query "who works at Acme"
+
+# Check stats
+python brain.py stats
+```
+
+## Commands
+
+| Command | Args | Description |
+|---------|------|-------------|
+| `add` | `<type> <name> [summary]` | Create/update a node. Auto-embeds. |
+| `log` | `<type> <name> <entry>` | Append a timeline entry. Re-embeds. |
+| `edge` | `<src_type> <src_name> <tgt_type> <tgt_name> <rel>` | Create a directed edge |
+| `search` | `<query> [type]` | Find nodes by name |
+| `fts` | `<query>` | Keyword search across file content |
+| `vec` | `<query>` | Vector similarity search |
+| `query` | `<query> [hops]` | Full retrieval: vec + keyword + graph traversal |
+| `neighbors` | `<node_id> [hops]` | Graph neighborhood |
+| `read` | `<node_id>` | Read a node's markdown |
+| `list` | `[type]` | List nodes |
+| `types` | | List all categories |
+| `delete` | `<node_id>` | Remove node, edges, vectors, and file |
+| `reindex` | | Re-embed all nodes from their files |
+| `rebuild` | | Scan filesystem, re-register + re-embed all (use after DB wipe) |
+| `stats` | | Show counts |
+
+## Page Format
+
+```markdown
+---
+aliases: [Jenny, jen@acme.com]
+tags: [engineering, leadership]
+---
+
+# Jane Smith
+
+> VP Engineering at Acme Corp. Leading their AI platform team.
+
+## State
+- **Role:** VP Engineering
+- **Company:** Acme Corp
+- **Relationship:** Customer contact
+- **Key context:** Decision maker for our enterprise deal
+
+## What They're Working On
+Building an internal AI platform for their 500-person eng org.
+
+## Open Threads
+- Waiting on security review for new pricing tier
+
+---
+
+## Timeline
+- **2026-06-04** | Meeting — Discussed Q3 roadmap priorities.
+- **2026-05-22** | Email — Sent pricing proposal for 500-seat tier.
+- **2026-06-01** | Created — Page created.
+```
+
+## Browser Explorer
+
+Start the API server and open `brain-explorer.html`:
+
+```bash
+python serve.py  # runs on http://localhost:7433
+```
+
+## Embeddings
+
+Uses GitHub Models API (`text-embedding-3-small`, 1536 dimensions) authenticated via `gh auth token`. Free with GitHub Copilot license, rate-limited.
+
+The vector table uses [sqlite-vec](https://github.com/asg017/sqlite-vec) for KNN search directly in SQLite — no external vector DB needed.
+
+## As a Clawpilot Skill
+
+Drop this repo into `~/.copilot/m-skills/brain/` and invoke with `/brain`. The `SKILL.md` file contains full instructions for the AI agent on how to use the brain — when to add nodes, how to fill templates, when to re-embed, etc.
+
+## License
+
+MIT
