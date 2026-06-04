@@ -28,6 +28,11 @@ class BrainHandler(http.server.BaseHTTPRequestHandler):
                 result = brain.fts_search(q)
             elif path == "/search" and q:
                 result = brain.search(q)
+            elif path == "/graph":
+                db = brain.get_db()
+                nodes = [dict(r) for r in db.execute("SELECT id, type, name FROM nodes").fetchall()]
+                edges = [dict(r) for r in db.execute("SELECT source_id, target_id, relationship FROM edges").fetchall()]
+                result = {"nodes": nodes, "edges": edges}
             elif path == "/list":
                 result = brain.list_nodes(q or None)
             elif path == "/read" and q:
