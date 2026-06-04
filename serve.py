@@ -1,11 +1,12 @@
-"""Lightweight HTTP API for the brain. Run: python ~/.brain/serve.py"""
+"""Lightweight HTTP API for the brain. Run: python ~/.copilot/m-skills/brain/serve.py"""
 import http.server
 import json
 import sys
 import urllib.parse
 from pathlib import Path
 
-sys.path.insert(0, str(Path.home() / ".brain"))
+# Import brain.py from the same directory as this script
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import brain
 
 PORT = 7433
