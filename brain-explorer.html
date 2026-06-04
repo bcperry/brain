@@ -379,24 +379,50 @@ function renderGraph() {
   canvas.style.height = H + 'px';
 
   // Zoom & pan state
-  let scale = 1;
-  let offsetX = 0, offsetY = 0;
+  let scale = 0.4; // start zoomed out to fit all
+  let offsetX = W * 0.3, offsetY = H * 0.15;
   let isPanning = false;
   let panStartX = 0, panStartY = 0;
+  let dragNode = null;
 
   function toWorld(cx, cy) {
     return [(cx - offsetX) / scale, (cy - offsetY) / scale];
   }
 
-  // Build simulation nodes
-  const nodes = graphData.nodes.map(n => ({
-    id: n.id, name: n.name, type: n.type,
-    x: W/2 + (Math.random()-0.5) * 400,
-    y: H/2 + (Math.random()-0.5) * 400,
-    vx: 0, vy: 0
-  }));
+  // Group nodes by type and lay them out in radial clusters
+  const typeGroups = {};
+  for (const n of graphData.nodes) {
+    if (!typeGroups[n.type]) typeGroups[n.type] = [];
+    typeGroups[n.type].push(n);
+  }
+  const types = Object.keys(typeGroups);
+  const cx = W / 2 / 0.4; // world-space center
+  const cy = H / 2 / 0.4;
+  const clusterRadius = Math.max(300, types.length * 80);
 
-  const nodeMap = new Map(nodes.map(n => [n.id, n]));
+  const nodes = [];
+  const nodeMap = new Map();
+
+  types.forEach((type, ti) => {
+    const angle = (2 * Math.PI * ti) / types.length - Math.PI / 2;
+    const clusterCx = cx + Math.cos(angle) * clusterRadius;
+    const clusterCy = cy + Math.sin(angle) * clusterRadius;
+    const group = typeGroups[type];
+    const cols = Math.ceil(Math.sqrt(group.length));
+    const spacing = 40;
+
+    group.forEach((n, ni) => {
+      const row = Math.floor(ni / cols);
+      const col = ni % cols;
+      const node = {
+        id: n.id, name: n.name, type: n.type,
+        x: clusterCx + (col - cols/2) * spacing,
+        y: clusterCy + (row - Math.ceil(group.length/cols)/2) * spacing,
+      };
+      nodes.push(node);
+      nodeMap.set(n.id, node);
+    });
+  });
 
   const edges = graphData.edges.map(e => ({
     source: nodeMap.get(e.source_id),
@@ -404,48 +430,7 @@ function renderGraph() {
     relationship: e.relationship
   })).filter(e => e.source && e.target);
 
-  const NODE_RADIUS = 14;
-  const EDGE_LENGTH = 120;
-
-  function tick() {
-    // Repulsion between all nodes
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i+1; j < nodes.length; j++) {
-        const a = nodes[i], b = nodes[j];
-        let dx = b.x - a.x, dy = b.y - a.y;
-        let dist = Math.sqrt(dx*dx + dy*dy) || 1;
-        let force = 1200 / (dist * dist);
-        let fx = (dx / dist) * force, fy = (dy / dist) * force;
-        a.vx -= fx; a.vy -= fy;
-        b.vx += fx; b.vy += fy;
-      }
-    }
-
-    // Edge attraction
-    for (const e of edges) {
-      let dx = e.target.x - e.source.x, dy = e.target.y - e.source.y;
-      let dist = Math.sqrt(dx*dx + dy*dy) || 1;
-      let force = (dist - EDGE_LENGTH) * 0.008;
-      let fx = (dx / dist) * force, fy = (dy / dist) * force;
-      e.source.vx += fx; e.source.vy += fy;
-      e.target.vx -= fx; e.target.vy -= fy;
-    }
-
-    // Center gravity
-    for (const n of nodes) {
-      n.vx += (W/2 - n.x) * 0.0005;
-      n.vy += (H/2 - n.y) * 0.0005;
-    }
-
-    // Apply velocity with damping
-    for (const n of nodes) {
-      n.vx *= 0.88; n.vy *= 0.88;
-      n.x += n.vx; n.y += n.vy;
-    }
-
-    draw();
-    animFrame = requestAnimationFrame(tick);
-  }
+  const NODE_RADIUS = 10;
 
   function draw() {
     ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
@@ -460,36 +445,27 @@ function renderGraph() {
     const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--cp-border').trim();
 
     // Draw edges
+    ctx.globalAlpha = 0.3;
     for (const e of edges) {
       ctx.beginPath();
       ctx.moveTo(e.source.x, e.source.y);
       ctx.lineTo(e.target.x, e.target.y);
       ctx.strokeStyle = edgeColor;
-      ctx.lineWidth = 1.2 / scale;
+      ctx.lineWidth = 1 / scale;
       ctx.stroke();
+    }
+    ctx.globalAlpha = 1.0;
 
-      // Edge label (only show when zoomed in enough)
-      if (scale > 0.5) {
+    // Draw edge labels only when zoomed in
+    if (scale > 1.2) {
+      for (const e of edges) {
         const mx = (e.source.x + e.target.x) / 2;
         const my = (e.source.y + e.target.y) / 2;
-        ctx.font = `${10/scale}px "Segoe UI", sans-serif`;
+        ctx.font = `${9/scale}px "Segoe UI", sans-serif`;
         ctx.fillStyle = mutedColor;
         ctx.textAlign = 'center';
-        ctx.fillText(e.relationship, mx, my - 6/scale);
+        ctx.fillText(e.relationship, mx, my - 4/scale);
       }
-
-      // Arrow
-      const angle = Math.atan2(e.target.y - e.source.y, e.target.x - e.source.x);
-      const arrowX = e.target.x - Math.cos(angle) * (NODE_RADIUS + 4);
-      const arrowY = e.target.y - Math.sin(angle) * (NODE_RADIUS + 4);
-      const arrowSize = 6 / Math.max(scale, 0.5);
-      ctx.beginPath();
-      ctx.moveTo(arrowX, arrowY);
-      ctx.lineTo(arrowX - arrowSize*Math.cos(angle-0.4), arrowY - arrowSize*Math.sin(angle-0.4));
-      ctx.lineTo(arrowX - arrowSize*Math.cos(angle+0.4), arrowY - arrowSize*Math.sin(angle+0.4));
-      ctx.closePath();
-      ctx.fillStyle = edgeColor;
-      ctx.fill();
     }
 
     // Draw nodes
@@ -499,19 +475,39 @@ function renderGraph() {
       ctx.fillStyle = getTypeColor(n.type);
       ctx.fill();
       ctx.strokeStyle = borderColor;
-      ctx.lineWidth = 1.5 / scale;
+      ctx.lineWidth = 1 / scale;
       ctx.stroke();
+    }
 
-      // Node label
-      if (scale > 0.3) {
-        ctx.font = `${11/scale}px "Segoe UI", sans-serif`;
+    // Node labels only when zoomed in enough to read
+    if (scale > 0.6) {
+      for (const n of nodes) {
+        ctx.font = `${10/scale}px "Segoe UI", sans-serif`;
         ctx.fillStyle = textColor;
         ctx.textAlign = 'center';
-        ctx.fillText(n.name, n.x, n.y + NODE_RADIUS + 12/scale);
+        ctx.fillText(n.name, n.x, n.y + NODE_RADIUS + 10/scale);
       }
     }
 
+    // Type cluster labels (always visible)
+    types.forEach((type, ti) => {
+      const angle = (2 * Math.PI * ti) / types.length - Math.PI / 2;
+      const lx = cx + Math.cos(angle) * (clusterRadius + 60);
+      const ly = cy + Math.sin(angle) * (clusterRadius + 60);
+      ctx.font = `bold ${14/scale}px "Segoe UI", sans-serif`;
+      ctx.fillStyle = getTypeColor(type);
+      ctx.textAlign = 'center';
+      ctx.fillText(type.toUpperCase(), lx, ly);
+    });
+
     ctx.restore();
+  }
+
+  // Render loop for interaction (only redraws on input)
+  let needsDraw = true;
+  function renderLoop() {
+    if (needsDraw) { draw(); needsDraw = false; }
+    animFrame = requestAnimationFrame(renderLoop);
   }
 
   // Zoom with mouse wheel
@@ -520,32 +516,27 @@ function renderGraph() {
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
-
     const zoomFactor = e.deltaY < 0 ? 1.15 : 0.87;
-    const newScale = Math.max(0.1, Math.min(10, scale * zoomFactor));
-
-    // Zoom toward cursor
+    const newScale = Math.max(0.05, Math.min(10, scale * zoomFactor));
     offsetX = mx - (mx - offsetX) * (newScale / scale);
     offsetY = my - (my - offsetY) * (newScale / scale);
     scale = newScale;
+    needsDraw = true;
   }, { passive: false });
 
-  // Pan with middle-click or right-click drag, or shift+left
   canvas.addEventListener('mousedown', (e) => {
     const rect = canvas.getBoundingClientRect();
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
     const [wx, wy] = toWorld(cx, cy);
 
-    // Check if clicking a node (left-click drag node)
-    if (e.button === 0 && !e.shiftKey) {
+    // Check if clicking a node
+    if (e.button === 0) {
       for (const n of nodes) {
         const dx = wx - n.x, dy = wy - n.y;
         if (dx*dx + dy*dy < NODE_RADIUS*NODE_RADIUS) { dragNode = n; return; }
       }
     }
-
-    // Otherwise pan
     isPanning = true;
     panStartX = e.clientX - offsetX;
     panStartY = e.clientY - offsetY;
@@ -555,6 +546,7 @@ function renderGraph() {
     if (isPanning) {
       offsetX = e.clientX - panStartX;
       offsetY = e.clientY - panStartY;
+      needsDraw = true;
       return;
     }
     if (dragNode) {
@@ -562,7 +554,7 @@ function renderGraph() {
       const [wx, wy] = toWorld(e.clientX - rect.left, e.clientY - rect.top);
       dragNode.x = wx;
       dragNode.y = wy;
-      dragNode.vx = 0; dragNode.vy = 0;
+      needsDraw = true;
       return;
     }
 
@@ -594,17 +586,15 @@ function renderGraph() {
   canvas.addEventListener('mouseup', () => { dragNode = null; isPanning = false; });
   canvas.addEventListener('mouseleave', () => { dragNode = null; isPanning = false; tooltip.style.display = 'none'; });
 
-  // Drag node ref
-  let dragNode = null;
-
-  // Fit-to-view on double-click
+  // Double-click to fit view
   canvas.addEventListener('dblclick', () => {
-    scale = 1; offsetX = 0; offsetY = 0;
+    scale = 0.4; offsetX = W * 0.3; offsetY = H * 0.15;
+    needsDraw = true;
   });
 
   // Start
   if (animFrame) cancelAnimationFrame(animFrame);
-  tick();
+  renderLoop();
 }
 
 // Resize handler
