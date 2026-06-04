@@ -52,11 +52,11 @@ tags: []
 - **Embeddings** = GitHub Models API (`text-embedding-3-small`, 1536d) via `gh auth token`
 
 ### Engine Commands
-Run with: `python ~/.copilot/m-skills/brain/brain.py <command> [args...]`
+Run with: `python <skill-dir>/brain.py [--brain <path>] <command> [args...]`
 
-Set `BRAIN_DIR` environment variable to target a specific brain:
-- Default (personal): `~/.brain/`
-- Army brain: `~/.army-brain/`
+The `<skill-dir>` is wherever this skill is installed (e.g., `~/.copilot/m-skills/brain/`).
+
+Default data location: `~/.brain/`. Use `--brain <path>` to target a different brain.
 
 | Command | Args | Description |
 |---------|------|-------------|
@@ -79,15 +79,24 @@ Node IDs: `type/slug` (e.g., `people/blaine-perry`, `projects/clawpilot`)
 
 ### Multi-Brain Support
 
-The engine supports multiple independent brains via the `BRAIN_DIR` environment variable:
+The engine supports multiple independent brains. Default is `~/.brain/`.
 
 ```bash
 # Personal brain (default)
-python ~/.copilot/m-skills/brain/brain.py stats
+python brain.py stats
 
-# Army brain
-$env:BRAIN_DIR="$env:USERPROFILE\.army-brain"; python ~/.copilot/m-skills/brain/brain.py stats
+# Standalone brain (separate data, separate graph, separate vectors)
+python brain.py --brain ~/.brain-army stats
+python brain.py --brain ~/.brain-army add units "1st Brigade" "Infantry brigade"
 ```
+
+Alternatively, set the `BRAIN_DIR` environment variable.
+
+Each brain is fully independent — its own `.graph.db`, markdown files, and vector embeddings.
+The directory is auto-created on first use.
+
+**When the user specifies a brain by name**, use `--brain <path>` on every command.
+**When no brain is specified**, always use the default (`~/.brain/`).
 
 ### How to Use This Skill
 
