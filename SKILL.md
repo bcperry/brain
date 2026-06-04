@@ -1,8 +1,3 @@
----
-name: "brain"
-description: "Personal knowledge graph (second brain). Add, relate, and query concepts stored as markdown in ~/.brain with a SQLite graph for relationships. Categories are fully dynamic — any type (people, projects, family, etc.) auto-creates its own folder."
----
-
 ## Second Brain Skill
 
 A personal knowledge graph stored in `~/.brain/`. Markdown files are the content; SQLite is the relationship + vector layer. Page format follows the gbrain two-layer pattern: compiled truth + timeline.
@@ -57,7 +52,11 @@ tags: []
 - **Embeddings** = GitHub Models API (`text-embedding-3-small`, 1536d) via `gh auth token`
 
 ### Engine Commands
-Run with: `python ~/.brain/brain.py <command> [args...]`
+Run with: `python ~/.copilot/m-skills/brain/brain.py <command> [args...]`
+
+Set `BRAIN_DIR` environment variable to target a specific brain:
+- Default (personal): `~/.brain/`
+- Army brain: `~/.army-brain/`
 
 | Command | Args | Description |
 |---------|------|-------------|
@@ -77,6 +76,18 @@ Run with: `python ~/.brain/brain.py <command> [args...]`
 | `stats` | | Show counts |
 
 Node IDs: `type/slug` (e.g., `people/blaine-perry`, `projects/clawpilot`)
+
+### Multi-Brain Support
+
+The engine supports multiple independent brains via the `BRAIN_DIR` environment variable:
+
+```bash
+# Personal brain (default)
+python ~/.copilot/m-skills/brain/brain.py stats
+
+# Army brain
+$env:BRAIN_DIR="$env:USERPROFILE\.army-brain"; python ~/.copilot/m-skills/brain/brain.py stats
+```
 
 ### How to Use This Skill
 

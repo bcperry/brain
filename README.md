@@ -7,12 +7,13 @@ Inspired by [gbrain](https://github.com/garrytan/gbrain), but built to be minima
 ## How It Works
 
 ```
-~/.copilot/m-skills/brain/   ← Code (this repo)
+<this-repo>/                 ← Code (skill + engine)
   SKILL.md                    Skill instructions for Clawpilot / AI agents
   brain.py                    Engine (graph, embeddings, file ops)
   serve.py                    HTTP API for the browser-based explorer
+  brain-explorer.html         Browser UI (graph viewer + search)
 
-~/.brain/                    ← Data (your knowledge)
+~/.brain/                    ← Default data directory
   .graph.db                   SQLite: nodes, edges, vectors (sqlite-vec)
   people/                     Markdown files by category
   projects/
@@ -36,7 +37,7 @@ Inspired by [gbrain](https://github.com/garrytan/gbrain), but built to be minima
 ## Quick Start
 
 ```bash
-# Create your first node
+# Create your first node (data goes to ~/.brain/ by default)
 python brain.py add people "Jane Smith" "VP Engineering at Acme Corp"
 
 # Add a relationship
@@ -49,7 +50,32 @@ python brain.py query "who works at Acme"
 python brain.py stats
 ```
 
+## Multiple Brains
+
+By default, all data goes to `~/.brain/`. To use a separate standalone brain (e.g., for a specific domain), use the `--brain` flag:
+
+```bash
+# Use a different brain
+python brain.py --brain ~/.brain-army add units "1st Brigade" "Infantry brigade, Fort Stewart"
+python brain.py --brain ~/.brain-army stats
+
+# Or set via environment variable
+export BRAIN_DIR=~/.brain-army
+python brain.py stats
+```
+
+Each brain is fully independent — its own `.graph.db`, its own markdown files, its own vector embeddings. The `--brain` flag (or `BRAIN_DIR` env var) can be passed to any command including `serve.py`:
+
+```bash
+# Explore your army brain in the browser
+BRAIN_DIR=~/.brain-army python serve.py
+```
+
+The flag works with any path. The directory is auto-created on first use.
+
 ## Commands
+
+All commands accept an optional `--brain <path>` flag before the command name.
 
 | Command | Args | Description |
 |---------|------|-------------|
@@ -106,8 +132,16 @@ Building an internal AI platform for their 500-person eng org.
 Start the API server and open `brain-explorer.html`:
 
 ```bash
-python serve.py  # runs on http://localhost:7433
+# Default brain
+python serve.py
+
+# Specific brain
+BRAIN_DIR=~/.brain-army python serve.py
 ```
+
+The explorer runs at `http://localhost:7433` and includes:
+- **Search tab** — vector similarity, keyword, name matching with scores
+- **Graph tab** — interactive force-directed visualization of nodes and edges
 
 ## Embeddings
 
