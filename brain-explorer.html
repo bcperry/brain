@@ -598,13 +598,13 @@ function renderGraph() {
 
     // Edge labels when zoomed
     if (scale > 2) {
-      ctx.font = `${9/scale}px "Segoe UI", sans-serif`;
+      ctx.font = `bold ${18/scale}px "Segoe UI", sans-serif`;
       ctx.fillStyle = mutedColor;
       ctx.textAlign = 'center';
       for (const e of visibleEdges) {
         const mx = (e.source.x + e.target.x) / 2;
         const my = (e.source.y + e.target.y) / 2;
-        ctx.fillText(e.relationship, mx, my - 4/scale);
+        ctx.fillText(e.relationship, mx, my - 8/scale);
       }
     }
 
@@ -616,14 +616,12 @@ function renderGraph() {
       ctx.fill();
     }
 
-    // Node labels when zoomed enough
-    if (scale > 1) {
-      ctx.font = `${9/scale}px "Segoe UI", sans-serif`;
-      ctx.fillStyle = textColor;
-      ctx.textAlign = 'center';
-      for (const n of visibleNodes) {
-        ctx.fillText(n.name, n.x, n.y + NODE_RADIUS + 8/scale);
-      }
+    // Node labels — always visible
+    ctx.font = `bold ${18/scale}px "Segoe UI", sans-serif`;
+    ctx.fillStyle = textColor;
+    ctx.textAlign = 'center';
+    for (const n of visibleNodes) {
+      ctx.fillText(n.name, n.x, n.y + NODE_RADIUS + 14/scale);
     }
 
     ctx.restore();
