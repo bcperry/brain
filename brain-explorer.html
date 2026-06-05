@@ -470,15 +470,15 @@ function renderGraph() {
 
   const NODE_RADIUS = 10;
 
-  // --- Pre-compute layout synchronously ---
-  // Use Barnes-Hut-like approach: build spatial grid for repulsion
-  const ITERATIONS = 600;
+  // --- Layout: dynamic simulation for small graphs, fixed iterations for large ---
+  const LARGE_GRAPH_THRESHOLD = 200;
   const EDGE_LENGTH = 60;
+  let simRunning = false;
+  let simAlpha = 1.0; // "temperature" — simulation stops when this decays to ~0
 
-  for (let iter = 0; iter < ITERATIONS; iter++) {
-    const temp = 1 - iter / ITERATIONS; // temperature: 1→0
-    const damping = 0.5 + temp * 0.4;
-    const maxDisplacement = 50 * temp + 2;
+  function simStep(alpha) {
+    const damping = 0.5 + alpha * 0.4;
+    const maxDisplacement = 50 * alpha + 2;
 
     // Repulsion — use grid bucketing to avoid O(n²)
     const cellSize = 200;
@@ -494,7 +494,6 @@ function renderGraph() {
     for (const n of nodes) {
       const gx = Math.floor(n.x / cellSize);
       const gy = Math.floor(n.y / cellSize);
-      // Check neighboring cells
       for (let dx = -2; dx <= 2; dx++) {
         for (let dy = -2; dy <= 2; dy++) {
           const cell = grid[`${gx+dx},${gy+dy}`];
@@ -539,18 +538,33 @@ function renderGraph() {
     }
   }
 
-  // --- Fit layout to viewport ---
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const n of nodes) {
-    minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
-    maxX = Math.max(maxX, n.x); maxY = Math.max(maxY, n.y);
+  if (nodes.length >= LARGE_GRAPH_THRESHOLD) {
+    // Large graph: pre-compute layout in a fixed loop (no animation)
+    const ITERATIONS = 600;
+    for (let iter = 0; iter < ITERATIONS; iter++) {
+      simStep(1 - iter / ITERATIONS);
+    }
+  } else {
+    // Small graph: run dynamic simulation that converges naturally
+    simRunning = true;
+    simAlpha = 1.0;
   }
-  const graphW = maxX - minX || 1;
-  const graphH = maxY - minY || 1;
-  const padding = 60;
-  scale = Math.min((W - padding*2) / graphW, (H - padding*2) / graphH);
-  offsetX = padding - minX * scale;
-  offsetY = padding - minY * scale;
+
+  // --- Fit layout to viewport ---
+  function fitToViewport() {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of nodes) {
+      minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x); maxY = Math.max(maxY, n.y);
+    }
+    const graphW = maxX - minX || 1;
+    const graphH = maxY - minY || 1;
+    const padding = 60;
+    scale = Math.min((W - padding*2) / graphW, (H - padding*2) / graphH);
+    offsetX = padding - minX * scale;
+    offsetY = padding - minY * scale;
+  }
+  fitToViewport();
 
   // --- Drawing ---
   function draw() {
@@ -615,10 +629,20 @@ function renderGraph() {
     ctx.restore();
   }
 
-  // Render loop — only redraws when needed
+  // Render loop — runs simulation when active, redraws when needed
   let needsDraw = true;
+  let userHasInteracted = false; // stop auto-fitting after user pans/zooms
   window._graphNeedsDraw = () => { needsDraw = true; };
   function renderLoop() {
+    if (simRunning) {
+      simStep(simAlpha);
+      simAlpha *= 0.995; // decay temperature each frame
+      if (simAlpha < 0.001) {
+        simRunning = false;
+      }
+      if (!userHasInteracted) fitToViewport();
+      needsDraw = true;
+    }
     if (needsDraw) { draw(); needsDraw = false; }
     animFrame = requestAnimationFrame(renderLoop);
   }
@@ -626,6 +650,7 @@ function renderGraph() {
   // Zoom
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
+    userHasInteracted = true;
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
@@ -644,10 +669,20 @@ function renderGraph() {
     if (e.button === 0) {
       for (const n of nodes) {
         const dx = wx - n.x, dy = wy - n.y;
-        if (dx*dx + dy*dy < NODE_RADIUS*NODE_RADIUS / (scale*scale) * 4) { dragNode = n; return; }
+        if (dx*dx + dy*dy < NODE_RADIUS*NODE_RADIUS / (scale*scale) * 4) {
+          dragNode = n;
+          // Reheat simulation on drag so neighbors react
+          if (nodes.length < LARGE_GRAPH_THRESHOLD) {
+            simRunning = true;
+            simAlpha = Math.max(simAlpha, 0.3);
+            userHasInteracted = true;
+          }
+          return;
+        }
       }
     }
     isPanning = true;
+    userHasInteracted = true;
     panStartX = e.clientX - offsetX;
     panStartY = e.clientY - offsetY;
   });
@@ -697,9 +732,8 @@ function renderGraph() {
 
   // Double-click to reset view
   canvas.addEventListener('dblclick', () => {
-    scale = Math.min((W - 120) / graphW, (H - 120) / graphH);
-    offsetX = padding - minX * scale;
-    offsetY = padding - minY * scale;
+    userHasInteracted = false;
+    fitToViewport();
     needsDraw = true;
   });
 
