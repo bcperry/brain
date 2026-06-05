@@ -16,7 +16,9 @@ import json
 import re
 import sys
 import struct
+import hashlib
 import subprocess
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -32,6 +34,9 @@ DB_PATH = BRAIN_DIR / ".graph.db"
 EMBED_MODEL = "text-embedding-3-small"
 EMBED_DIM = 1536
 EMBED_URL = "https://models.inference.ai.azure.com/embeddings"
+EMBED_BATCH_SIZE = 20  # texts per API call (GitHub Models limit)
+EMBED_RETRY_MAX = 5
+EMBED_RETRY_BASE_DELAY = 2.0  # seconds, doubled each retry
 
 # --- Page Templates ---
 
@@ -249,6 +254,12 @@ def get_db():
     db.execute("CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target_id)")
 
+    # Add content_hash column for skip-unchanged optimization (idempotent migration)
+    try:
+        db.execute("ALTER TABLE nodes ADD COLUMN content_hash TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
     if HAS_VEC:
         db.execute(f"""
             CREATE VIRTUAL TABLE IF NOT EXISTS vec_nodes USING vec0(
@@ -289,21 +300,38 @@ def get_gh_token() -> str:
 
 
 def get_embeddings(texts: list) -> list:
+    """Call embeddings API with exponential backoff on rate limits."""
     token = get_gh_token()
     if not token:
         raise RuntimeError("No GitHub token. Run 'gh auth login'.")
     import urllib.request, urllib.error
     payload = json.dumps({"input": texts, "model": EMBED_MODEL}).encode()
-    req = urllib.request.Request(EMBED_URL, data=payload, headers={
-        "Authorization": f"Bearer {token}", "Content-Type": "application/json"
-    })
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = json.loads(resp.read())
-        return [item["embedding"] for item in data["data"]]
+    req_headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    for attempt in range(EMBED_RETRY_MAX):
+        req = urllib.request.Request(EMBED_URL, data=payload, headers=req_headers)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+                return [item["embedding"] for item in data["data"]]
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < EMBED_RETRY_MAX - 1:
+                delay = EMBED_RETRY_BASE_DELAY * (2 ** attempt)
+                retry_after = e.headers.get("Retry-After")
+                if retry_after:
+                    delay = max(delay, float(retry_after))
+                time.sleep(delay)
+            else:
+                raise
 
 
 def serialize_f32(vec: list) -> bytes:
     return struct.pack(f"{len(vec)}f", *vec)
+
+
+def content_hash(text: str) -> str:
+    """SHA-256 of content — used to skip re-embedding unchanged nodes."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def embed_node(db, nid: str, content: str):
@@ -315,6 +343,44 @@ def embed_node(db, nid: str, content: str):
     db.execute("DELETE FROM vec_nodes WHERE node_id = ?", (nid,))
     db.execute("INSERT INTO vec_nodes (node_id, embedding) VALUES (?, ?)", (nid, vec_bytes))
     db.commit()
+
+
+def embed_batch(db, items: list[tuple[str, str]]) -> dict:
+    """Embed multiple (nid, content) pairs in batches. Returns stats dict."""
+    if not HAS_VEC or not items:
+        return {"embedded": 0, "skipped": 0, "errors": []}
+
+    results = {"embedded": 0, "skipped": 0, "errors": []}
+
+    for i in range(0, len(items), EMBED_BATCH_SIZE):
+        batch = items[i:i + EMBED_BATCH_SIZE]
+        texts = [content for _, content in batch]
+        nids = [nid for nid, _ in batch]
+
+        try:
+            embeddings = get_embeddings(texts)
+            for nid, vec in zip(nids, embeddings):
+                vec_bytes = serialize_f32(vec)
+                db.execute("DELETE FROM vec_nodes WHERE node_id = ?", (nid,))
+                db.execute("INSERT INTO vec_nodes (node_id, embedding) VALUES (?, ?)", (nid, vec_bytes))
+                # Store content hash so we can skip next time
+                chash = content_hash(next(c for n, c in batch if n == nid))
+                db.execute("UPDATE nodes SET content_hash = ? WHERE id = ?", (chash, nid))
+            db.commit()
+            results["embedded"] += len(batch)
+        except Exception as e:
+            results["errors"].append(f"batch {i//EMBED_BATCH_SIZE}: {str(e)}")
+            # Try individually as fallback so one bad item doesn't kill the batch
+            for nid, txt in batch:
+                try:
+                    embed_node(db, nid, txt)
+                    db.execute("UPDATE nodes SET content_hash = ? WHERE id = ?", (content_hash(txt), nid))
+                    db.commit()
+                    results["embedded"] += 1
+                except Exception as e2:
+                    results["errors"].append(f"{nid}: {str(e2)}")
+
+    return results
 
 
 # --- Core Operations ---
@@ -352,6 +418,8 @@ def add_node(node_type: str, name: str, content: str = "", embed: bool = True) -
         full_content = file_path.read_text(encoding="utf-8")
         try:
             embed_node(db, nid, full_content)
+            db.execute("UPDATE nodes SET content_hash = ? WHERE id = ?", (content_hash(full_content), nid))
+            db.commit()
         except Exception as e:
             return {"id": nid, "type": node_type, "name": name, "file": rel_path, "embed_error": str(e)}
 
@@ -379,6 +447,8 @@ def log_event(node_type: str, name: str, entry: str) -> dict:
     full_content = file_path.read_text(encoding="utf-8")
     try:
         embed_node(db, nid, full_content)
+        db.execute("UPDATE nodes SET content_hash = ? WHERE id = ?", (content_hash(full_content), nid))
+        db.commit()
     except Exception as e:
         return {"id": nid, "logged": entry, "embed_error": str(e)}
 
@@ -591,25 +661,34 @@ def query_related(query: str, hops: int = 2, use_vec: bool = True) -> dict:
 
 # --- Maintenance ---
 
-def reindex_all() -> dict:
-    """Re-embed all nodes from their markdown files."""
+def reindex_all(force: bool = False) -> dict:
+    """Re-embed nodes from their markdown files. Skips unchanged content unless force=True."""
     db = get_db()
-    nodes = db.execute("SELECT id, file_path FROM nodes").fetchall()
-    results = {"total": len(nodes), "embedded": 0, "errors": []}
+    nodes = db.execute("SELECT id, file_path, content_hash FROM nodes").fetchall()
+    results = {"total": len(nodes), "embedded": 0, "skipped": 0, "errors": []}
 
+    to_embed = []
     for node in nodes:
         nid = node["id"]
         fp = BRAIN_DIR / node["file_path"]
         if not fp.exists():
             results["errors"].append(f"{nid}: file not found")
             continue
-        content = fp.read_text(encoding="utf-8")
-        if HAS_VEC:
-            try:
-                embed_node(db, nid, content)
-                results["embedded"] += 1
-            except Exception as e:
-                results["errors"].append(f"{nid}: {str(e)}")
+        file_content = fp.read_text(encoding="utf-8")
+        if not file_content.strip():
+            results["skipped"] += 1
+            continue
+        # Skip if content hasn't changed
+        chash = content_hash(file_content)
+        if not force and node["content_hash"] == chash:
+            results["skipped"] += 1
+            continue
+        to_embed.append((nid, file_content))
+
+    if to_embed and HAS_VEC:
+        batch_results = embed_batch(db, to_embed)
+        results["embedded"] = batch_results["embedded"]
+        results["errors"].extend(batch_results["errors"])
 
     return results
 
@@ -640,6 +719,7 @@ def rebuild() -> dict:
     """Scan filesystem, re-register all nodes, and re-embed. Use after DB deletion."""
     db = get_db()
     results = {"found": 0, "registered": 0, "embedded": 0, "errors": []}
+    to_embed = []
 
     # Scan all category directories
     for category_dir in BRAIN_DIR.iterdir():
@@ -649,10 +729,10 @@ def rebuild() -> dict:
         for md_file in category_dir.glob("*.md"):
             results["found"] += 1
             slug = md_file.stem
-            content = md_file.read_text(encoding="utf-8")
+            file_content = md_file.read_text(encoding="utf-8")
 
             # Extract name from the H1 heading
-            name_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+            name_match = re.search(r'^#\s+(.+)$', file_content, re.MULTILINE)
             name = name_match.group(1).strip() if name_match else slug
 
             nid = f"{node_type}/{slug}"
@@ -668,15 +748,17 @@ def rebuild() -> dict:
                 )
             results["registered"] += 1
 
-            # Embed
-            if HAS_VEC:
-                try:
-                    embed_node(db, nid, content)
-                    results["embedded"] += 1
-                except Exception as e:
-                    results["errors"].append(f"{nid}: {str(e)}")
+            if file_content.strip():
+                to_embed.append((nid, file_content))
 
     db.commit()
+
+    # Batch embed all collected nodes
+    if to_embed and HAS_VEC:
+        batch_results = embed_batch(db, to_embed)
+        results["embedded"] = batch_results["embedded"]
+        results["errors"].extend(batch_results["errors"])
+
     return results
 
 # --- CLI ---
@@ -730,7 +812,8 @@ if __name__ == "__main__":
         elif cmd == "rebuild":
             result = rebuild()
         elif cmd == "reindex":
-            result = reindex_all()
+            force = "--force" in args
+            result = reindex_all(force=force)
         elif cmd == "stats":
             result = stats()
         else:
