@@ -38,12 +38,41 @@ EMBED_BATCH_SIZE = 20  # texts per API call (GitHub Models limit)
 EMBED_RETRY_MAX = 5
 EMBED_RETRY_BASE_DELAY = 2.0  # seconds, doubled each retry
 
+VAULT_DIRS = [
+    "raw",
+    "00-Inbox",
+    "10-Notes/entities",
+    "10-Notes/concepts",
+    "20-Projects",
+    "30-Areas",
+    "40-Resources",
+    "50-Archive",
+    "_meta/MOCs",
+    "_meta/templates",
+]
+
+ENTITY_TYPES = {
+    "people", "person", "companies", "company", "organizations", "organization",
+    "orgs", "org", "customers", "customer", "products", "product", "teams",
+    "team", "units", "unit", "entities", "entity",
+}
+CONCEPT_TYPES = {"concepts", "concept", "ideas", "idea", "topics", "topic"}
+PROJECT_TYPES = {"projects", "project"}
+AREA_TYPES = {"areas", "area"}
+RESOURCE_TYPES = {"resources", "resource", "summaries", "summary", "analysis", "analyses"}
+
 # --- Page Templates ---
 
 TEMPLATES = {
     "people": """---
+title: "{name}"
+type: people
+created: {date}
+updated: {date}
 aliases: []
 tags: []
+sources: []
+status: active
 ---
 
 # {name}
@@ -68,8 +97,14 @@ tags: []
 - **{date}** | Created — Page created.
 """,
     "projects": """---
+title: "{name}"
+type: projects
+created: {date}
+updated: {date}
 aliases: []
 tags: []
+sources: []
+status: active
 ---
 
 # {name}
@@ -96,8 +131,14 @@ tags: []
 - **{date}** | Created — Page created.
 """,
     "companies": """---
+title: "{name}"
+type: companies
+created: {date}
+updated: {date}
 aliases: []
 tags: []
+sources: []
+status: active
 ---
 
 # {name}
@@ -121,8 +162,14 @@ tags: []
 - **{date}** | Created — Page created.
 """,
     "concepts": """---
+title: "{name}"
+type: concepts
+created: {date}
+updated: {date}
 aliases: []
 tags: []
+sources: []
+status: active
 ---
 
 # {name}
@@ -144,8 +191,14 @@ tags: []
 - **{date}** | Created — Page created.
 """,
     "_default": """---
+title: "{name}"
+type: {node_type}
+created: {date}
+updated: {date}
 aliases: []
 tags: []
+sources: []
+status: active
 ---
 
 # {name}
@@ -170,7 +223,7 @@ def get_template(node_type: str, name: str) -> str:
     t = slugify(node_type)
     template = TEMPLATES.get(t, TEMPLATES["_default"])
     date = datetime.now().strftime("%Y-%m-%d")
-    return template.format(name=name, date=date)
+    return template.format(name=name, node_type=t, date=date)
 
 
 def parse_page(content: str) -> dict:
@@ -195,11 +248,21 @@ def update_compiled_truth(existing_content: str, new_content: str) -> str:
     parts = parse_page(existing_content)
     result = ""
     if parts["frontmatter"]:
-        result += f"---\n{parts['frontmatter']}\n---\n\n"
+        frontmatter = set_frontmatter_field(parts["frontmatter"], "updated", datetime.now().strftime("%Y-%m-%d"))
+        result += f"---\n{frontmatter}\n---\n\n"
     result += new_content.strip()
     if parts["timeline"]:
         result += f"\n\n---\n\n{parts['timeline']}"
     return result
+
+
+def set_frontmatter_field(frontmatter: str, key: str, value: str) -> str:
+    """Set a simple scalar YAML frontmatter field without requiring a YAML dependency."""
+    pattern = rf"^{re.escape(key)}:\s*.*$"
+    replacement = f"{key}: {value}"
+    if re.search(pattern, frontmatter, flags=re.MULTILINE):
+        return re.sub(pattern, replacement, frontmatter, count=1, flags=re.MULTILINE)
+    return f"{frontmatter.rstrip()}\n{replacement}"
 
 
 def append_timeline(file_path: Path, entry: str):
@@ -213,6 +276,12 @@ def append_timeline(file_path: Path, entry: str):
         content = content[:insert_pos] + timeline_entry + "\n" + content[insert_pos:]
     else:
         content += f"\n\n---\n\n## Timeline\n{timeline_entry}\n"
+    if content.startswith("---"):
+        parts = parse_page(content)
+        frontmatter = set_frontmatter_field(parts["frontmatter"], "updated", date)
+        content = f"---\n{frontmatter}\n---\n\n{parts['compiled']}"
+        if parts["timeline"]:
+            content += f"\n\n---\n\n{parts['timeline']}"
     file_path.write_text(content, encoding="utf-8")
 
 
@@ -285,10 +354,176 @@ def node_id(node_type: str, name: str) -> str:
     return f"{slugify(node_type)}/{slugify(name)}"
 
 
+def write_if_missing(path: Path, content: str):
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+
+def ensure_vault_structure():
+    """Create the deck-style markdown vault scaffold while preserving .graph.db."""
+    BRAIN_DIR.mkdir(parents=True, exist_ok=True)
+    for rel in VAULT_DIRS:
+        (BRAIN_DIR / rel).mkdir(parents=True, exist_ok=True)
+
+    write_if_missing(BRAIN_DIR / "AGENTS.md", """# Second Brain AGENTS.md
+
+## Layers and ownership
+- `raw/` contains immutable source copies or references.
+- Wiki pages are maintained by the assistant as compiled knowledge.
+- Schema and conventions are co-evolved with the user.
+
+## Core operations
+- Ingest: read sources fully, preserve source references, update related pages, MOCs, `index.md`, and `log.md`.
+- Query: read `index.md`, drill into linked pages, synthesize with citations to wiki pages.
+- Lint: report contradictions, orphans, stale evergreen claims, implicit concepts, missing links, and inbox backlog before fixing.
+""")
+    write_if_missing(BRAIN_DIR / "README.md", "# Second Brain\n\nPlain markdown vault with SQLite graph and vector embeddings in `.graph.db`.\n")
+    write_if_missing(BRAIN_DIR / "index.md", "# Second Brain Index\n\n## Entities\n\n## Concepts\n\n## Projects\n\n## Areas\n\n## Resources\n\n## MOCs\n")
+    write_if_missing(BRAIN_DIR / "log.md", "# Second Brain Log\n\n")
+    write_if_missing(BRAIN_DIR / "_meta" / "conventions.md", """# Conventions
+
+- Use kebab-case filenames for atomic notes.
+- Use `YYYY-MM-DD-slug.md` for inbox captures.
+- Use `[[wiki-links]]` for cross-references.
+- Keep one idea per page and cite sources when known.
+""")
+    write_if_missing(BRAIN_DIR / "_meta" / "MOCs" / "home.md", """---
+title: "Home"
+type: moc
+created: {date}
+updated: {date}
+tags: []
+sources: []
+status: active
+---
+
+# Home
+
+## Key entry points
+- [[../../index]]
+""".format(date=datetime.now().strftime("%Y-%m-%d")))
+
+
+def category_base_dir(node_type: str) -> Path:
+    t = slugify(node_type)
+    if t in CONCEPT_TYPES:
+        return BRAIN_DIR / "10-Notes" / "concepts"
+    if t in PROJECT_TYPES:
+        return BRAIN_DIR / "20-Projects"
+    if t in AREA_TYPES:
+        return BRAIN_DIR / "30-Areas"
+    if t in RESOURCE_TYPES:
+        return BRAIN_DIR / "40-Resources"
+    return BRAIN_DIR / "10-Notes" / "entities"
+
+
 def ensure_category_dir(node_type: str) -> Path:
-    d = BRAIN_DIR / slugify(node_type)
+    ensure_vault_structure()
+    t = slugify(node_type)
+    base = category_base_dir(t)
+    if t in PROJECT_TYPES or t in AREA_TYPES or t in RESOURCE_TYPES:
+        d = base
+    elif t in CONCEPT_TYPES:
+        d = base
+    else:
+        d = base / t
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def append_vault_log(action: str, nid: str, rel_path: str):
+    ensure_vault_structure()
+    date = datetime.now().strftime("%Y-%m-%d")
+    with (BRAIN_DIR / "log.md").open("a", encoding="utf-8") as f:
+        f.write(f"- **{date}** | {action} | {nid} | {rel_path}\n")
+
+
+def update_index_entry(node_type: str, name: str, rel_path: str):
+    ensure_vault_structure()
+    index_path = BRAIN_DIR / "index.md"
+    content = index_path.read_text(encoding="utf-8")
+    t = slugify(node_type)
+    section = "Entities"
+    if t in CONCEPT_TYPES:
+        section = "Concepts"
+    elif t in PROJECT_TYPES:
+        section = "Projects"
+    elif t in AREA_TYPES:
+        section = "Areas"
+    elif t in RESOURCE_TYPES:
+        section = "Resources"
+
+    link_target = rel_path.replace("\\", "/").removesuffix(".md")
+    entry = f"- [[{link_target}|{name}]]"
+    if entry in content:
+        return
+
+    header = f"## {section}"
+    if header not in content:
+        content = content.rstrip() + f"\n\n{header}\n"
+
+    lines = content.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip() == header:
+            insert_at = i + 1
+            while insert_at < len(lines) and not lines[insert_at].startswith("## "):
+                insert_at += 1
+            lines.insert(insert_at, entry)
+            index_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+            return
+
+
+def parse_frontmatter_field(content: str, key: str) -> str | None:
+    if not content.startswith("---"):
+        return None
+    end = content.find("---", 3)
+    if end == -1:
+        return None
+    frontmatter = content[3:end]
+    match = re.search(rf"^{re.escape(key)}:\s*(.+)$", frontmatter, flags=re.MULTILINE)
+    if not match:
+        return None
+    return match.group(1).strip().strip('"')
+
+
+def infer_type_from_path(md_file: Path, content: str) -> str:
+    frontmatter_type = parse_frontmatter_field(content, "type")
+    if frontmatter_type:
+        return slugify(frontmatter_type)
+
+    rel = md_file.relative_to(BRAIN_DIR)
+    parts = rel.parts
+    if len(parts) >= 3 and parts[0] == "10-Notes" and parts[1] == "entities":
+        return slugify(parts[2]) if len(parts) > 3 else "entities"
+    if len(parts) >= 2 and parts[0] == "10-Notes" and parts[1] == "concepts":
+        return "concepts"
+    if parts[0] == "20-Projects":
+        return "projects"
+    if parts[0] == "30-Areas":
+        return "areas"
+    if parts[0] == "40-Resources":
+        return "resources"
+    if parts[0] == "00-Inbox":
+        return "inbox"
+    if len(parts) >= 2 and parts[0] == "_meta" and parts[1] == "MOCs":
+        return "moc"
+    return slugify(md_file.parent.name)
+
+
+def is_indexable_markdown(md_file: Path) -> bool:
+    rel = md_file.relative_to(BRAIN_DIR)
+    if any(part.startswith(".") for part in rel.parts):
+        return False
+    if rel.parts[0] in {"raw", "50-Archive"}:
+        return False
+    if len(rel.parts) == 1 and rel.name in {"AGENTS.md", "README.md", "log.md"}:
+        return False
+    if len(rel.parts) >= 2 and rel.parts[0] == "_meta" and rel.parts[1] in {"templates"}:
+        return False
+    if rel == Path("_meta") / "conventions.md":
+        return False
+    return md_file.suffix.lower() == ".md"
 
 
 def get_gh_token() -> str:
@@ -392,12 +627,14 @@ def add_node(node_type: str, name: str, content: str = "", embed: bool = True) -
     cat_dir = ensure_category_dir(node_type)
     file_path = cat_dir / f"{slug}.md"
     now = datetime.now().isoformat()
+    created_file = False
 
     if not file_path.exists():
         page = get_template(node_type, name)
         if content:
             page = re.sub(r'> \[.*?\]', f'> {content}', page, count=1)
         file_path.write_text(page, encoding="utf-8")
+        created_file = True
     elif content:
         existing = file_path.read_text(encoding="utf-8")
         updated = update_compiled_truth(existing, content)
@@ -406,13 +643,15 @@ def add_node(node_type: str, name: str, content: str = "", embed: bool = True) -
     rel_path = str(file_path.relative_to(BRAIN_DIR))
     existing_node = db.execute("SELECT id FROM nodes WHERE id = ?", (nid,)).fetchone()
     if existing_node:
-        db.execute("UPDATE nodes SET updated_at = ? WHERE id = ?", (now, nid))
+        db.execute("UPDATE nodes SET file_path = ?, updated_at = ? WHERE id = ?", (rel_path, now, nid))
     else:
         db.execute(
             "INSERT INTO nodes (id, type, name, file_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
             (nid, slugify(node_type), name, rel_path, now, now)
         )
     db.commit()
+    update_index_entry(node_type, name, rel_path)
+    append_vault_log("Created" if created_file else "Updated", nid, rel_path)
 
     if embed:
         full_content = file_path.read_text(encoding="utf-8")
@@ -452,6 +691,7 @@ def log_event(node_type: str, name: str, entry: str) -> dict:
     except Exception as e:
         return {"id": nid, "logged": entry, "embed_error": str(e)}
 
+    append_vault_log("Timeline", nid, node["file_path"])
     return {"id": nid, "logged": entry}
 
 
@@ -694,6 +934,7 @@ def reindex_all(force: bool = False) -> dict:
 
 
 def stats() -> dict:
+    ensure_vault_structure()
     db = get_db()
     node_count = db.execute("SELECT COUNT(*) as c FROM nodes").fetchone()["c"]
     edge_count = db.execute("SELECT COUNT(*) as c FROM edges").fetchone()["c"]
@@ -713,43 +954,54 @@ def stats() -> dict:
     }
 
 
+def init_vault() -> dict:
+    ensure_vault_structure()
+    return {
+        "brain": str(BRAIN_DIR),
+        "database": str(DB_PATH),
+        "created": VAULT_DIRS + ["AGENTS.md", "README.md", "index.md", "log.md", "_meta/conventions.md", "_meta/MOCs/home.md"]
+    }
+
+
 
 
 def rebuild() -> dict:
     """Scan filesystem, re-register all nodes, and re-embed. Use after DB deletion."""
+    ensure_vault_structure()
     db = get_db()
     results = {"found": 0, "registered": 0, "embedded": 0, "errors": []}
     to_embed = []
 
-    # Scan all category directories
-    for category_dir in BRAIN_DIR.iterdir():
-        if not category_dir.is_dir() or category_dir.name.startswith('.'):
+    for md_file in BRAIN_DIR.rglob("*.md"):
+        if not is_indexable_markdown(md_file):
             continue
-        node_type = category_dir.name
-        for md_file in category_dir.glob("*.md"):
-            results["found"] += 1
-            slug = md_file.stem
-            file_content = md_file.read_text(encoding="utf-8")
+        results["found"] += 1
+        file_content = md_file.read_text(encoding="utf-8")
+        node_type = infer_type_from_path(md_file, file_content)
 
-            # Extract name from the H1 heading
-            name_match = re.search(r'^#\s+(.+)$', file_content, re.MULTILINE)
-            name = name_match.group(1).strip() if name_match else slug
+        name_match = re.search(r'^#\s+(.+)$', file_content, re.MULTILINE)
+        frontmatter_title = parse_frontmatter_field(file_content, "title")
+        name = name_match.group(1).strip() if name_match else (frontmatter_title or md_file.stem)
 
-            nid = f"{node_type}/{slug}"
-            rel_path = str(md_file.relative_to(BRAIN_DIR))
-            now = datetime.now().isoformat()
+        nid = node_id(node_type, name)
+        rel_path = str(md_file.relative_to(BRAIN_DIR))
+        now = datetime.now().isoformat()
 
-            # Register node
-            existing = db.execute("SELECT id FROM nodes WHERE id = ?", (nid,)).fetchone()
-            if not existing:
-                db.execute(
-                    "INSERT INTO nodes (id, type, name, file_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (nid, node_type, name, rel_path, now, now)
-                )
-            results["registered"] += 1
+        existing = db.execute("SELECT id FROM nodes WHERE id = ?", (nid,)).fetchone()
+        if existing:
+            db.execute(
+                "UPDATE nodes SET type = ?, name = ?, file_path = ?, updated_at = ? WHERE id = ?",
+                (slugify(node_type), name, rel_path, now, nid)
+            )
+        else:
+            db.execute(
+                "INSERT INTO nodes (id, type, name, file_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (nid, slugify(node_type), name, rel_path, now, now)
+            )
+        results["registered"] += 1
 
-            if file_content.strip():
-                to_embed.append((nid, file_content))
+        if file_content.strip():
+            to_embed.append((nid, file_content))
 
     db.commit()
 
@@ -759,6 +1011,63 @@ def rebuild() -> dict:
         results["embedded"] = batch_results["embedded"]
         results["errors"].extend(batch_results["errors"])
 
+    return results
+
+
+def migrate_vault_layout() -> dict:
+    """Move legacy root category markdown files into the deck-style vault layout and update DB paths."""
+    ensure_vault_structure()
+    db = get_db()
+    results = {"copied": 0, "archived": 0, "updated": 0, "skipped": 0, "errors": []}
+    structured_roots = {p.split("/")[0] for p in VAULT_DIRS} | {"_meta"}
+    reserved_files = {"AGENTS.md", "README.md", "index.md", "log.md"}
+
+    for category_dir in BRAIN_DIR.iterdir():
+        if not category_dir.is_dir() or category_dir.name.startswith(".") or category_dir.name in structured_roots:
+            continue
+        node_type = category_dir.name
+        for md_file in category_dir.glob("*.md"):
+            try:
+                if md_file.name in reserved_files:
+                    results["skipped"] += 1
+                    continue
+                destination_dir = ensure_category_dir(node_type)
+                destination = destination_dir / md_file.name
+                if not destination.exists():
+                    destination.write_text(md_file.read_text(encoding="utf-8"), encoding="utf-8")
+                    results["copied"] += 1
+                else:
+                    results["skipped"] += 1
+
+                content = destination.read_text(encoding="utf-8")
+                name_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+                name = name_match.group(1).strip() if name_match else destination.stem
+                nid = node_id(node_type, name)
+                rel_path = str(destination.relative_to(BRAIN_DIR))
+                now = datetime.now().isoformat()
+                existing = db.execute("SELECT id FROM nodes WHERE id = ?", (nid,)).fetchone()
+                if existing:
+                    db.execute("UPDATE nodes SET file_path = ?, updated_at = ? WHERE id = ?", (rel_path, now, nid))
+                else:
+                    db.execute(
+                        "INSERT INTO nodes (id, type, name, file_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                        (nid, slugify(node_type), name, rel_path, now, now)
+                    )
+                update_index_entry(node_type, name, rel_path)
+                archive_dir = BRAIN_DIR / "50-Archive" / "legacy" / node_type
+                archive_dir.mkdir(parents=True, exist_ok=True)
+                archive_path = archive_dir / md_file.name
+                if not archive_path.exists():
+                    md_file.replace(archive_path)
+                    results["archived"] += 1
+                else:
+                    results["skipped"] += 1
+                results["updated"] += 1
+            except Exception as e:
+                results["errors"].append(f"{md_file}: {e}")
+
+    db.commit()
+    append_vault_log("Migrated", "vault-layout", ".")
     return results
 
 # --- CLI ---
@@ -773,7 +1082,7 @@ if __name__ == "__main__":
         args = args[:idx] + args[idx+2:]
 
     if len(args) < 1:
-        print(json.dumps({"error": "Commands: add, edge, log, search, fts, vec, neighbors, read, query, types, list, delete, reindex, rebuild, stats"}))
+        print(json.dumps({"error": "Commands: init, add, edge, log, search, fts, vec, neighbors, read, query, types, list, delete, reindex, rebuild, migrate-vault, stats"}))
         sys.exit(1)
 
     # Ensure brain dir exists
@@ -781,7 +1090,9 @@ if __name__ == "__main__":
 
     cmd = args[0]
     try:
-        if cmd == "add":
+        if cmd == "init":
+            result = init_vault()
+        elif cmd == "add":
             result = add_node(args[1], args[2], args[3] if len(args) > 3 else "")
         elif cmd == "edge":
             result = add_edge(args[1], args[2], args[3], args[4], args[5])
@@ -811,6 +1122,8 @@ if __name__ == "__main__":
             result = delete_node(args[1])
         elif cmd == "rebuild":
             result = rebuild()
+        elif cmd == "migrate-vault":
+            result = migrate_vault_layout()
         elif cmd == "reindex":
             force = "--force" in args
             result = reindex_all(force=force)

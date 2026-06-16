@@ -1,17 +1,136 @@
+---
+name: "brain"
+description: "Personal knowledge graph (second brain). Uses a structured markdown vault in ~/.brain plus a SQLite graph/vector layer for relationships and embeddings."
+---
+
 ## Second Brain Skill
 
-A personal knowledge graph stored in `~/.brain/`. Markdown files are the content; SQLite is the relationship + vector layer. Page format follows the gbrain two-layer pattern: compiled truth + timeline.
+A personal knowledge graph stored in `~/.brain/`. The markdown layer uses the structured Second Brain vault layout from the deck; SQLite remains the relationship + vector layer over those markdown files. Page format follows the gbrain two-layer pattern: compiled truth + timeline.
+
 
 ### Storage Layout
 ```
 ~/.brain/
   .graph.db          # SQLite: graph (nodes + edges) + FTS5 + vec0 vectors
   brain.py           # Engine script
-  people/            # Auto-created category folders
-    blaine-perry.md
-  projects/
-    clawpilot.md
+  AGENTS.md          # Vault schema + operating rules
+  README.md
+  index.md           # Root catalog
+  log.md             # Greppable dated activity log
+  raw/               # Immutable source copies or references
+  00-Inbox/          # Captures waiting for processing
+  10-Notes/
+    entities/
+      people/
+        blaine-perry.md
+    concepts/
+  20-Projects/
+  30-Areas/
+  40-Resources/
+  50-Archive/
+  _meta/
+    conventions.md
+    MOCs/
+    templates/
 ```
+
+### Markdown Vault Pattern
+
+The default `/brain` implementation is a hybrid: the deck's structured
+plain-markdown vault plus the existing `brain.py` SQLite graph/vector engine.
+Markdown remains portable and Obsidian-friendly; `.graph.db` stores node
+metadata, relationships, content hashes, and embeddings.
+
+Deck-style vault layout:
+
+```text
+<vault>/
+  AGENTS.md                  # Schema + operating rules; read first
+  README.md
+  index.md                   # Root catalog
+  log.md                     # Greppable dated activity log
+  raw/                       # Immutable source copies or references
+  00-Inbox/                  # Captures waiting for processing
+  10-Notes/
+    entities/
+    concepts/
+  20-Projects/
+  30-Areas/
+  40-Resources/
+  50-Archive/
+  _meta/
+    conventions.md
+    MOCs/
+    templates/
+```
+
+In this mode, create or update `AGENTS.md` and `_meta/conventions.md` before
+writing many notes. `AGENTS.md` should define:
+
+- Three layers and ownership: raw sources are immutable user-provided inputs,
+  wiki pages are maintained by the assistant, schema/conventions are
+  co-evolved with the user.
+- Folder and naming rules: kebab-case atomic notes; dated inbox captures as
+  `YYYY-MM-DD-slug`; use `[[wiki-links]]` for cross-references.
+- Required YAML frontmatter for vault pages:
+
+```yaml
+---
+title: "Page Title"
+type: entity | concept | project | area | resource | moc | analysis | inbox
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+tags: []
+sources: []
+status: draft | active | evergreen | archived
+---
+```
+
+- Core operations:
+  - `ingest`: read source fully; store source copy/reference in `raw/`; create
+    a summary in `40-Resources/`; update entity/concept/project pages; update
+    relevant MOCs, `index.md`, and `log.md`; report every touched page.
+  - `query`: read `index.md` first; drill into linked pages; synthesize with
+    citations to wiki pages; offer to save non-trivial answers as analysis
+    pages.
+  - `lint`: find contradictions, orphans, stale evergreen claims, implicit
+    concepts, missing cross-references, and inbox backlog; report before
+    fixing.
+- House rules: one idea per page, cite sources, flag uncertainty, preserve raw
+  inputs, and keep `log.md` dated and greppable.
+
+Optional claims frontmatter block:
+
+```yaml
+claims:
+  - id: claim-001
+    text: "<assertion>"
+    confidence: 0.0
+    status: provisional | evergreen | disputed
+    evidence:
+      - source: raw/<file>
+        kind: documentation | quote | observation
+        excerpt: "<short quote>"
+        captured: YYYY-MM-DD
+        updated: YYYY-MM-DD
+```
+
+If claims are present, lint must flag disputed claims, no-evidence claims,
+contradictions across pages, and stale evergreen claims.
+
+### Hybrid Engine Behavior
+
+- `init` creates the complete vault scaffold without removing `.graph.db`.
+- `add` writes pages into the structured markdown folders and updates
+  `index.md`, `log.md`, SQLite metadata, and the node embedding.
+- `edge` continues to store relationships in SQLite.
+- `query` continues to combine name search, keyword search, vector search, graph
+  traversal, and markdown file reads.
+- `migrate-vault` moves legacy root category folders into the structured layout,
+  updates SQLite `file_path` values, and preserves old files under
+  `50-Archive/legacy/`.
+- `rebuild` recursively scans indexable vault markdown and re-registers/re-embeds
+  pages into SQLite.
 
 ### Page Format (gbrain-inspired)
 
@@ -19,8 +138,14 @@ Every page has three sections:
 
 ```markdown
 ---
+title: "Entity Name"
+type: people
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
 aliases: []
 tags: []
+sources: []
+status: active
 ---
 
 # Entity Name
@@ -73,6 +198,9 @@ Default data location: `~/.brain/`. Use `--brain <path>` to target a different b
 | `list` | `[type]` | List all nodes, optionally filtered by type |
 | `delete` | `<node_id>` | Remove node, edges, vectors, and file |
 | `reindex` | | Re-embed and re-index ALL nodes |
+| `rebuild` | | Recursively scan structured vault markdown, re-register nodes, and re-embed |
+| `migrate-vault` | | Move legacy root category pages into the structured markdown vault |
+| `init` | | Create the vault scaffold (`AGENTS.md`, folders, index, log, metadata) |
 | `stats` | | Show counts |
 
 Node IDs: `type/slug` (e.g., `people/blaine-perry`, `projects/clawpilot`)
@@ -104,8 +232,10 @@ The directory is auto-created on first use.
 1. Identify the entities and their types
 2. `add <type> "<name>" "<summary>"` — creates page with template, summary goes in the `>` block
 3. **Immediately read the file and fill in ALL fields you have data for:**
+   - frontmatter: `title`, `type`, `created`, `updated`, `aliases`, `tags`, `sources`, `status`
    - `aliases:` — known nicknames, alternate spellings, email handles
    - `tags:` — relevant categories (e.g., `[azure, ai, gov]`)
+   - `sources:` — supporting files, URLs, emails, meetings, or user-provided context when known
    - Every State field (Role, Company, Status, Stack, etc.)
    - Descriptive sections (What They're Working On, What It Does, etc.)
    - Replace every `[No data yet]` with real content if you have it

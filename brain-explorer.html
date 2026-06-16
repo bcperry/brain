@@ -229,7 +229,7 @@ button:hover { background: var(--cp-accent-hover); }
 </div>
 
 <script>
-const API = 'http://localhost:7433';
+const API = window.location.origin;
 
 // --- View switching ---
 function switchView(view) {
@@ -566,6 +566,14 @@ function renderGraph() {
   }
   fitToViewport();
 
+  // --- Precompute node degrees for sizing & label priority ---
+  const degreeMap = new Map();
+  for (const n of nodes) degreeMap.set(n, 0);
+  for (const e of edges) {
+    degreeMap.set(e.source, (degreeMap.get(e.source)||0) + 1);
+    degreeMap.set(e.target, (degreeMap.get(e.target)||0) + 1);
+  }
+
   // --- Drawing ---
   function draw() {
     ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
@@ -608,19 +616,39 @@ function renderGraph() {
       }
     }
 
-    // Draw nodes
+    // Draw nodes — size by degree
     for (const n of visibleNodes) {
+      const deg = degreeMap.get(n) || 0;
+      const r = NODE_RADIUS * (0.5 + Math.min(deg, 20) / 20 * 1.5);
       ctx.beginPath();
-      ctx.arc(n.x, n.y, NODE_RADIUS, 0, Math.PI * 2);
+      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
       ctx.fillStyle = getTypeColor(n.type);
       ctx.fill();
     }
 
-    // Node labels — always visible
-    ctx.font = `bold ${18/scale}px "Segoe UI", sans-serif`;
+    // Node labels — progressive disclosure based on zoom level
+    // At low zoom: show only high-degree nodes (hubs)
+    // At medium zoom: show more nodes
+    // At high zoom: show all visible nodes
+    ctx.font = `bold ${Math.min(14, 18/scale)}px "Segoe UI", sans-serif`;
     ctx.fillStyle = textColor;
     ctx.textAlign = 'center';
-    for (const n of visibleNodes) {
+
+    // Determine how many labels to show based on zoom
+    let labelBudget;
+    if (scale < 0.3) labelBudget = 10;
+    else if (scale < 0.6) labelBudget = 30;
+    else if (scale < 1.0) labelBudget = 80;
+    else if (scale < 2.0) labelBudget = 200;
+    else labelBudget = visibleNodes.length; // show all when zoomed in
+
+    // Also always show hovered/dragged node label
+    const labelCandidates = [...visibleNodes].sort((a, b) => (degreeMap.get(b)||0) - (degreeMap.get(a)||0));
+    const labelsToShow = new Set(labelCandidates.slice(0, labelBudget));
+    if (dragNode) labelsToShow.add(dragNode);
+
+    for (const n of labelsToShow) {
+      if (!visibleSet.has(n)) continue;
       ctx.fillText(n.name, n.x, n.y + NODE_RADIUS + 14/scale);
     }
 

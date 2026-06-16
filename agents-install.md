@@ -6,6 +6,12 @@ This document describes the custom agents and automations that support the brain
 
 Install these in `~/.copilot/agents/`:
 
+Agent definitions use `.agent.md` files with YAML frontmatter. The deck's
+general guidance maps to the same pattern shown below: `name`, `description`,
+`tools`, and `model` define the agent contract, followed by markdown
+instructions for behavior. Keep frontmatter minimal and put durable operating
+rules in the body or in the relevant vault `AGENTS.md`.
+
 ### army-brain-worker.agent.md
 
 **Purpose:** Processes individual data records and adds them to a brain instance using `brain.py`.  
@@ -132,7 +138,7 @@ $env:BRAIN_DIR="$env:USERPROFILE\.army-brain"
 
 Each brain has its own:
 - `.graph.db` (SQLite with nodes, edges, FTS5, vectors)
-- Category folders with markdown files
+- Structured markdown vault (`AGENTS.md`, `index.md`, `log.md`, `10-Notes/`, `20-Projects/`, `_meta/`, etc.)
 - Independent embedding state
 
 Agents and automations MUST set `$env:BRAIN_DIR` before every `brain.py` call.

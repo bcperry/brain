@@ -15,18 +15,41 @@ Inspired by [gbrain](https://github.com/garrytan/gbrain), but built to be minima
 
 ~/.brain/                    ← Default data directory
   .graph.db                   SQLite: nodes, edges, vectors (sqlite-vec)
-  people/                     Markdown files by category
-  projects/
-  companies/
-  concepts/
-  ...
+  AGENTS.md                   Vault schema + operating rules
+  README.md
+  index.md                    Root catalog
+  log.md                      Greppable dated activity log
+  raw/ 00-Inbox/ 50-Archive/
+  10-Notes/entities/          Entity pages grouped by type
+  10-Notes/concepts/          Concept pages
+  20-Projects/ 30-Areas/ 40-Resources/
+  _meta/conventions.md _meta/MOCs/ _meta/templates/
 ```
 
 **Principles:**
 - Content lives ONLY in markdown files — the DB stores metadata + vectors, never content
 - Each markdown file is embedded as ONE vector (no chunking)
-- Categories are fully dynamic — any type string auto-creates a folder
+- Categories are fully dynamic — any type string auto-creates a folder under the structured vault
 - Pages use a two-layer format: compiled truth (above `---`) + append-only timeline (below)
+
+## Structured Markdown Vault + SQLite
+
+The default implementation combines the companion deck's structured
+plain-markdown vault with the existing SQLite graph/vector engine:
+
+```text
+<vault>/
+  AGENTS.md README.md index.md log.md
+  raw/ 00-Inbox/ 50-Archive/
+  10-Notes/entities/ 10-Notes/concepts/
+  20-Projects/ 30-Areas/ 40-Resources/
+  _meta/conventions.md _meta/MOCs/ _meta/templates/
+```
+
+Markdown stays portable and Obsidian-friendly. SQLite keeps node metadata,
+edges, content hashes, and embeddings. `brain.py add` writes pages into the
+structured folders, updates `index.md` and `log.md`, and embeds the markdown
+file as one vector.
 
 ## Requirements
 
@@ -38,6 +61,7 @@ Inspired by [gbrain](https://github.com/garrytan/gbrain), but built to be minima
 
 ```bash
 # Create your first node (data goes to ~/.brain/ by default)
+# The vault scaffold is created automatically, or explicitly with: python brain.py init
 python brain.py add people "Jane Smith" "VP Engineering at Acme Corp"
 
 # Add a relationship
@@ -93,14 +117,22 @@ All commands accept an optional `--brain <path>` flag before the command name.
 | `delete` | `<node_id>` | Remove node, edges, vectors, and file |
 | `reindex` | | Re-embed all nodes from their files |
 | `rebuild` | | Scan filesystem, re-register + re-embed all (use after DB wipe) |
+| `init` | | Create the structured vault scaffold |
+| `migrate-vault` | | Move legacy root category pages into the structured vault |
 | `stats` | | Show counts |
 
 ## Page Format
 
 ```markdown
 ---
+title: "Jane Smith"
+type: people
+created: 2026-06-01
+updated: 2026-06-04
 aliases: [Jenny, jen@acme.com]
 tags: [engineering, leadership]
+sources: []
+status: active
 ---
 
 # Jane Smith

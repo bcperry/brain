@@ -1,6 +1,7 @@
 """Lightweight HTTP API for the brain. Run: python ~/.copilot/m-skills/brain/serve.py"""
 import http.server
 import json
+import os
 import sys
 import urllib.parse
 from pathlib import Path
@@ -10,7 +11,7 @@ SKILL_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SKILL_DIR))
 import brain
 
-PORT = 7433
+PORT = int(os.environ.get("BRAIN_PORT", "7433"))
 
 class BrainHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
