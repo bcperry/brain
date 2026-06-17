@@ -80,19 +80,19 @@ By default, all data goes to `~/.brain/`. To use a separate standalone brain (e.
 
 ```bash
 # Use a different brain
-python brain.py --brain ~/.brain-army add units "1st Brigade" "Infantry brigade, Fort Stewart"
-python brain.py --brain ~/.brain-army stats
+python brain.py --brain ~/.brain-customer-a add companies "Acme Corp" "Customer account"
+python brain.py --brain ~/.brain-customer-a stats
 
 # Or set via environment variable
-export BRAIN_DIR=~/.brain-army
+export BRAIN_DIR=~/.brain-customer-a
 python brain.py stats
 ```
 
 Each brain is fully independent — its own `.graph.db`, its own markdown files, its own vector embeddings. The `--brain` flag (or `BRAIN_DIR` env var) can be passed to any command including `serve.py`:
 
 ```bash
-# Explore your army brain in the browser
-BRAIN_DIR=~/.brain-army python serve.py
+# Explore a specific brain in the browser
+BRAIN_DIR=~/.brain-customer-a python serve.py
 ```
 
 The flag works with any path. The directory is auto-created on first use.
@@ -115,6 +115,7 @@ All commands accept an optional `--brain <path>` flag before the command name.
 | `list` | `[type]` | List nodes |
 | `types` | | List all categories |
 | `delete` | `<node_id>` | Remove node, edges, vectors, and file |
+| `audit-enrichment` | `[--limit=N] [--type=<type>]` | Deterministically scan markdown pages and return scored enrichment candidates |
 | `reindex` | | Re-embed all nodes from their files |
 | `rebuild` | | Scan filesystem, re-register + re-embed all (use after DB wipe) |
 | `init` | | Create the structured vault scaffold |
@@ -168,7 +169,7 @@ Start the API server and open `brain-explorer.html`:
 python serve.py
 
 # Specific brain
-BRAIN_DIR=~/.brain-army python serve.py
+BRAIN_DIR=~/.brain-customer-a python serve.py
 ```
 
 The explorer runs at `http://localhost:7433` and includes:

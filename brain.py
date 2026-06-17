@@ -933,6 +933,160 @@ def reindex_all(force: bool = False) -> dict:
     return results
 
 
+def _has_filled_field(content: str, field_name: str) -> bool:
+    match = re.search(rf"(?im)^-\s+\*\*{re.escape(field_name)}:\*\*\s*(.+)$", content)
+    if not match:
+        return False
+    value = match.group(1).strip()
+    return bool(value and value not in {"[No data yet]", "[Unknown]", "Unknown", "TBD"})
+
+
+def _frontmatter_list_value(content: str, key: str) -> str:
+    value = parse_frontmatter_field(content, key)
+    return value or ""
+
+
+def _is_empty_frontmatter_list(value: str) -> bool:
+    normalized = value.strip()
+    return normalized in {"", "[]", "[ ]"}
+
+
+def _section_has_content(content: str, heading: str) -> bool:
+    match = re.search(
+        rf"(?ims)^##\s+{re.escape(heading)}\s*\n(.+?)(?=^##\s+|\n---\s*\n|\Z)",
+        content,
+    )
+    if not match:
+        return False
+    value = match.group(1).strip()
+    placeholders = {"[No data yet]", "[Unknown]", "[None]", "[None yet]", "TBD"}
+    return bool(value and value not in placeholders and not value.startswith("["))
+
+
+def _suggested_evidence_sources(node_type: str) -> list[str]:
+    sources = ["brain graph neighbors", "fts"]
+    if node_type == "people":
+        sources.extend(["workiq_search_people", "workiq_search_emails"])
+    elif node_type in {"companies", "organizations", "customers"}:
+        sources.extend(["workiq_search_people", "workiq_search_emails"])
+    elif node_type == "projects":
+        sources.extend(["workiq_search_emails", "workiq_list_events"])
+    else:
+        sources.append("workiq_search_emails")
+    return sources
+
+
+def audit_enrichment_candidates(limit: int = 50, node_type_filter: str | None = None) -> dict:
+    """Deterministically scan markdown for pages that need enrichment."""
+    ensure_vault_structure()
+    candidates = []
+    totals = {
+        "scanned": 0,
+        "candidates": 0,
+        "with_no_data": 0,
+        "creation_only": 0,
+        "missing_major_context": 0,
+    }
+
+    for md_file in sorted(BRAIN_DIR.rglob("*.md")):
+        if not is_indexable_markdown(md_file):
+            continue
+
+        content = md_file.read_text(encoding="utf-8")
+        node_type = infer_type_from_path(md_file, content)
+        if node_type_filter and slugify(node_type_filter) != node_type:
+            continue
+
+        totals["scanned"] += 1
+        name_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+        title = parse_frontmatter_field(content, "title")
+        name = name_match.group(1).strip() if name_match else (title or md_file.stem)
+        rel_path = str(md_file.relative_to(BRAIN_DIR))
+
+        no_data_count = len(re.findall(r"\[(?:No data yet|Unknown)\]", content, flags=re.IGNORECASE))
+        created_only = (
+            re.search(r"\|\s+Created\s+—\s+Page created\.", content) is not None
+            and re.search(r"\|\s+(Email|Meeting|Teams|Source|Call|Note|Updated|User|Directory)\s+—\s+", content) is None
+        )
+        missing = []
+
+        for field in ("title", "type", "created", "updated", "status"):
+            if not parse_frontmatter_field(content, field):
+                missing.append(f"frontmatter_{field}")
+        if _is_empty_frontmatter_list(_frontmatter_list_value(content, "sources")):
+            missing.append("source_references")
+        if re.search(r"(?m)^>\s*\[", content) or not re.search(r"(?m)^>\s+\S", content):
+            missing.append("summary")
+
+        if node_type == "people":
+            for field in ("Role", "Company", "Relationship", "Key context"):
+                if not _has_filled_field(content, field):
+                    missing.append(field.lower().replace(" ", "_"))
+            if _is_empty_frontmatter_list(_frontmatter_list_value(content, "aliases")):
+                missing.append("aliases")
+        elif node_type == "projects":
+            for field in ("Status", "Stack", "Team"):
+                if not _has_filled_field(content, field):
+                    missing.append(field.lower())
+            if not _section_has_content(content, "What It Does"):
+                missing.append("what_it_does")
+            if not _section_has_content(content, "Key Decisions"):
+                missing.append("key_decisions")
+        elif node_type in {"companies", "organizations", "customers"}:
+            for field in ("What", "Stage", "Relationship"):
+                if not _has_filled_field(content, field):
+                    missing.append(field.lower())
+            if not _section_has_content(content, "Key Context"):
+                missing.append("key_context")
+        elif node_type == "concepts":
+            if not _section_has_content(content, "Core Idea"):
+                missing.append("core_idea")
+            if not _section_has_content(content, "Why It Matters"):
+                missing.append("why_it_matters")
+            if not _section_has_content(content, "See Also"):
+                missing.append("see_also")
+        elif no_data_count:
+            missing.append("compiled_truth")
+        elif not _section_has_content(content, "Details"):
+            missing.append("details")
+
+        has_major_gap = bool(missing)
+        if no_data_count:
+            totals["with_no_data"] += 1
+        if created_only:
+            totals["creation_only"] += 1
+        if has_major_gap:
+            totals["missing_major_context"] += 1
+
+        if not (no_data_count or created_only or has_major_gap):
+            continue
+
+        score = no_data_count + (5 if created_only else 0) + (2 * len(set(missing)))
+
+        candidates.append({
+            "id": node_id(node_type, name),
+            "type": node_type,
+            "name": name,
+            "file_path": rel_path,
+            "score": score,
+            "reasons": {
+                "no_data_count": no_data_count,
+                "creation_only": created_only,
+                "missing": sorted(set(missing)),
+            },
+            "suggested_evidence_sources": _suggested_evidence_sources(node_type),
+        })
+
+    candidates.sort(key=lambda item: (-item["score"], item["type"], item["name"]))
+    totals["candidates"] = len(candidates)
+    return {
+        "brain": str(BRAIN_DIR),
+        "totals": totals,
+        "returned": min(limit, len(candidates)),
+        "candidates": candidates[:limit],
+    }
+
+
 def stats() -> dict:
     ensure_vault_structure()
     db = get_db()
@@ -1082,7 +1236,7 @@ if __name__ == "__main__":
         args = args[:idx] + args[idx+2:]
 
     if len(args) < 1:
-        print(json.dumps({"error": "Commands: init, add, edge, log, search, fts, vec, neighbors, read, query, types, list, delete, reindex, rebuild, migrate-vault, stats"}))
+        print(json.dumps({"error": "Commands: init, add, edge, log, search, fts, vec, neighbors, read, query, types, list, delete, audit-enrichment, reindex, rebuild, migrate-vault, stats"}))
         sys.exit(1)
 
     # Ensure brain dir exists
@@ -1127,6 +1281,15 @@ if __name__ == "__main__":
         elif cmd == "reindex":
             force = "--force" in args
             result = reindex_all(force=force)
+        elif cmd == "audit-enrichment":
+            limit = 50
+            node_type = None
+            for arg in args[1:]:
+                if arg.startswith("--limit="):
+                    limit = int(arg.split("=", 1)[1])
+                elif arg.startswith("--type="):
+                    node_type = arg.split("=", 1)[1]
+            result = audit_enrichment_candidates(limit=limit, node_type_filter=node_type)
         elif cmd == "stats":
             result = stats()
         else:

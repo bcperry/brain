@@ -197,6 +197,7 @@ Default data location: `~/.brain/`. Use `--brain <path>` to target a different b
 | `types` | | List all categories |
 | `list` | `[type]` | List all nodes, optionally filtered by type |
 | `delete` | `<node_id>` | Remove node, edges, vectors, and file |
+| `audit-enrichment` | `[--limit=N] [--type=<type>]` | Deterministically scan all indexable markdown pages and return enrichment candidates with missing fields and suggested evidence sources |
 | `reindex` | | Re-embed and re-index ALL nodes |
 | `rebuild` | | Recursively scan structured vault markdown, re-register nodes, and re-embed |
 | `migrate-vault` | | Move legacy root category pages into the structured markdown vault |
@@ -214,8 +215,8 @@ The engine supports multiple independent brains. Default is `~/.brain/`.
 python brain.py stats
 
 # Standalone brain (separate data, separate graph, separate vectors)
-python brain.py --brain ~/.brain-army stats
-python brain.py --brain ~/.brain-army add units "1st Brigade" "Infantry brigade"
+python brain.py --brain ~/.brain-customer-a stats
+python brain.py --brain ~/.brain-customer-a add companies "Acme Corp" "Customer account"
 ```
 
 Alternatively, set the `BRAIN_DIR` environment variable.
@@ -228,23 +229,21 @@ The directory is auto-created on first use.
 
 ### How to Use This Skill
 
-**People-page enrichment is mandatory when context tools are available.**
-Do not leave people pages as creation-only stubs if Microsoft 365 context can
-fill basic facts. For every `people` node you create or touch:
-1. Search the organizational directory with `workiq_search_people` using the
-   person's name and any known email address.
-2. If the directory returns a confident match, update aliases/email, role,
-   company/organization, department, and relationship from the returned fields.
-3. If directory data is missing or the person is external, search recent email
-   with `workiq_search_emails` for the person's name and known addresses. Use
-   subjects, sender domains, signatures, and repeated thread context to infer
-   only durable facts such as organization, project/account context, active
-   topics, and open threads.
-4. Do not copy long private email text into the brain. Store concise derived
+**Page enrichment is mandatory when context tools are available.**
+Do not leave markdown pages as creation-only stubs if durable context can fill
+basic facts. For every page you create or touch:
+1. Fill required frontmatter, summary, State fields, descriptive sections, source
+   references, and Open Threads when evidence is available.
+2. Use type-appropriate context sources:
+   - `people`: `workiq_search_people`, then `workiq_search_emails` when directory data is thin.
+   - `companies`/`organizations`/`customers`: graph neighbors, people search, and email context.
+   - `projects`: graph neighbors, related people, email threads, and calendar events.
+   - `concepts`/other notes: graph neighbors, FTS, related markdown, and email context when relevant.
+3. Do not copy long private email text into the brain. Store concise derived
    facts with source references like `email: Subject (YYYY-MM-DD)`.
-5. If multiple people could match the same name, do not guess. Record ambiguity
-   in Open Threads or ask the user which person to use.
-6. After direct markdown edits, run `reindex`.
+4. If multiple entities could match the same name, do not guess. Record
+   ambiguity in Open Threads or ask the user which entity to use.
+5. After direct markdown edits, run `reindex`.
 
 **When the user wants to remember something:**
 1. Identify the entities and their types
@@ -286,11 +285,13 @@ What They're Working On: AI platform. Don't leave fields empty when you have the
 - `stats` — overview
 
 **When the user wants to improve or maintain the brain:**
-1. Run `stats`, then audit markdown pages for `[No data yet]`, creation-only
-   timelines, and missing State fields.
-2. Prioritize `people` pages missing role/company/email because those are often
-   recoverable from directory and email context.
-3. Enrich in small batches. For each person, gather directory/email evidence,
+1. Run `stats`, then `audit-enrichment --limit=50` to deterministically scan
+   all indexable markdown pages for `[No data yet]`, creation-only timelines,
+   missing major State fields, missing frontmatter, empty source references,
+   placeholder summaries, and type-specific missing context.
+2. Prioritize by the returned score, not by page type. The candidate output
+   includes `suggested_evidence_sources` for each page.
+3. Enrich in small batches. For each candidate, gather the suggested evidence,
    update compiled truth above the timeline, append a dated timeline entry, and
    report changed pages.
 4. Prefer high-confidence durable facts over exhaustive detail. If evidence is
