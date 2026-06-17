@@ -228,6 +228,24 @@ The directory is auto-created on first use.
 
 ### How to Use This Skill
 
+**People-page enrichment is mandatory when context tools are available.**
+Do not leave people pages as creation-only stubs if Microsoft 365 context can
+fill basic facts. For every `people` node you create or touch:
+1. Search the organizational directory with `workiq_search_people` using the
+   person's name and any known email address.
+2. If the directory returns a confident match, update aliases/email, role,
+   company/organization, department, and relationship from the returned fields.
+3. If directory data is missing or the person is external, search recent email
+   with `workiq_search_emails` for the person's name and known addresses. Use
+   subjects, sender domains, signatures, and repeated thread context to infer
+   only durable facts such as organization, project/account context, active
+   topics, and open threads.
+4. Do not copy long private email text into the brain. Store concise derived
+   facts with source references like `email: Subject (YYYY-MM-DD)`.
+5. If multiple people could match the same name, do not guess. Record ambiguity
+   in Open Threads or ask the user which person to use.
+6. After direct markdown edits, run `reindex`.
+
 **When the user wants to remember something:**
 1. Identify the entities and their types
 2. `add <type> "<name>" "<summary>"` — creates page with template, summary goes in the `>` block
@@ -266,6 +284,18 @@ What They're Working On: AI platform. Don't leave fields empty when you have the
 - `list <type>` — show all nodes in a category
 - `neighbors "<node_id>" 2` — show 2-hop neighborhood
 - `stats` — overview
+
+**When the user wants to improve or maintain the brain:**
+1. Run `stats`, then audit markdown pages for `[No data yet]`, creation-only
+   timelines, and missing State fields.
+2. Prioritize `people` pages missing role/company/email because those are often
+   recoverable from directory and email context.
+3. Enrich in small batches. For each person, gather directory/email evidence,
+   update compiled truth above the timeline, append a dated timeline entry, and
+   report changed pages.
+4. Prefer high-confidence durable facts over exhaustive detail. If evidence is
+   weak, keep the field as `[No data yet]` and add an Open Thread describing the
+   missing fact.
 
 ### Type-Specific Templates
 
